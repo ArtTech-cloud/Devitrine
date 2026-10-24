@@ -30,8 +30,8 @@ A especificação completa está em `docs/SPEC.md` e é a fonte da verdade do pr
 Definidos na Fase 0; mantenha esta lista igual aos scripts do `package.json`.
 
 - `pnpm dev` e `pnpm build`
-- `pnpm lint`, `pnpm typecheck`, `pnpm test` e `pnpm test:e2e`
-- `supabase start` (Postgres local), `pnpm db:generate` e `pnpm db:migrate`
+- `pnpm lint`, `pnpm typecheck`, `pnpm test` (unitários), `pnpm test:integration` (RLS, exige `supabase start`) e `pnpm test:e2e` (exige `pnpm build`)
+- `supabase start` (Postgres local), `pnpm db:generate`, `pnpm db:migrate` e `pnpm db:check`
 
 ## Estrutura
 

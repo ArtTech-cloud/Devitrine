@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Migrações existentes não mudam
+        run: MIGRATIONS_BASE_REF=origin/${{ github.base_ref || 'main' }} pnpm db:check
+      - name: Auditoria de dependências
+        run: pnpm audit --prod --audit-level high
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Supabase local
+        run: supabase start -x studio,imgproxy,edge-runtime,logflare,vector,mailpit
+      - name: Migrações e testes de integração (RLS)
+        run: |
+          supabase status -o env > /tmp/supabase.env
+          set -a; . /tmp/supabase.env; set +a
+          export DATABASE_URL="$DB_URL"
+          pnpm db:migrate
+          pnpm test:integration
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+      - name: E2E (papéis e TOTP) contra o build local
+        run: |
+          set -a; . /tmp/supabase.env; set +a
+          export DATABASE_URL="$DB_URL"
+          export NEXT_PUBLIC_SUPABASE_URL="$API_URL" NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY" SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          pnpm exec playwright install --with-deps chromium
+          pnpm build
+          pnpm test:e2e

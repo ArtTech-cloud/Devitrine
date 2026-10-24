@@ -157,6 +157,8 @@ docs/             SPEC.md e decisions/
 - ADR-003: Asaas no MVP por reunir split, subcontas e conta escrow no mesmo provedor.
 - ADR-004: ledger de dupla entrada como fonte da verdade do dinheiro.
 - ADR-005: webhook vira registro na caixa de entrada e é processado por job, nunca na requisição.
+- ADR-006: papel em `public.users` por trigger; admin só por convite (service key) e com TOTP (`aal2`).
+- ADR-007: `withUser`/`withService` para acesso a dados, fronteira de módulo no lint e migrações SQL com checksum.
 
 ## 6. Modelo de dados
 
