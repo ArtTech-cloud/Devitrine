@@ -94,3 +94,27 @@ describe('máscara do logger: vazamentos reportados pelo Vigia', () => {
     expect(out).toContain('ok=1')
   })
 })
+
+describe('desempenho da máscara (payloads grandes de terceiros)', () => {
+  const MB = 1_000_000
+  const cases: Record<string, string> = {
+    alfanumérico: 'Ab1'.repeat(MB / 3),
+    'base64-like': 'Ab1_-'.repeat(MB / 5),
+    'token repetido': 'tokenx'.repeat(MB / 6),
+    'eyJ repetido': 'eyJabcdef'.repeat(MB / 9),
+    'dígitos': '1234567890'.repeat(MB / 10),
+    'espaços e =': 'token = '.repeat(MB / 8),
+  }
+  for (const [name, input] of Object.entries(cases)) {
+    it(`maskString de ~1 MB (${name}) termina em bem menos de 200 ms`, () => {
+      const t0 = performance.now()
+      maskString(input)
+      expect(performance.now() - t0).toBeLessThan(200)
+    })
+  }
+
+  it('segredo no fim de um texto grande continua mascarado', () => {
+    const out = maskString('x'.repeat(MB) + ' apikey=segredo-final')
+    expect(out).not.toContain('segredo-final')
+  })
+})

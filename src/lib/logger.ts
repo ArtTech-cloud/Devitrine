@@ -6,10 +6,11 @@ const SENSITIVE_KEY =
 const CPF = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g
 const CNPJ = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g
 const BEARER = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi
-const JWT = /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*)?/g
+const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*)?/g
+// Sem prefixo ilimitado (evita backtracking quadrático): o texto antes da palavra-chave é preservado.
 // chave=valor ou chave: valor em texto livre e URL (?access_token=..., apikey=..., token=abc).
 const KEY_VALUE =
-  /\b([A-Za-z0-9_-]*(?:token|secret|password|senha|api[-_]?key|jwt|signature|otp|totp|authorization)[A-Za-z0-9_-]*)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s&,;"']+)/gi
+  /((?:token|secret|password|senha|api[-_]?key|jwt|signature|otp|totp|authorization)[A-Za-z0-9_-]{0,40})(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s&,;"']+)/gi
 
 export const MASK = '[REDACTED]'
 
