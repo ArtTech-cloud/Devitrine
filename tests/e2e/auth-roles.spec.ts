@@ -104,3 +104,24 @@ test('admin só entra no painel depois do TOTP', async ({ page }) => {
   await page.getByRole('button', { name: 'Verificar' }).click()
   await expect(page).toHaveURL(/\/admin$/)
 })
+
+test('cookie de sessão sai httpOnly, SameSite=Lax e Secure só em produção', async ({ page, context }) => {
+  const email = `cookie-${stamp}@e2e.test`
+  const check = async () => {
+    const auth = (await context.cookies()).filter((c) => /^sb-.*-auth-token/.test(c.name))
+    expect(auth.length).toBeGreaterThan(0)
+    for (const c of auth) {
+      expect(c.httpOnly, `${c.name} httpOnly`).toBe(true)
+      expect(c.sameSite, `${c.name} sameSite`).toBe('Lax')
+      expect(c.secure, `${c.name} secure`).toBe(process.env.E2E_COOKIE_SECURE !== 'false')
+    }
+  }
+  await signUp(page, email, 'client')
+  await expect(page).toHaveURL(/\/app\/client$/)
+  await check()
+  await page.getByRole('button', { name: 'Sair' }).click()
+  await expect(page).toHaveURL(/\/login$/)
+  await signIn(page, email)
+  await expect(page).toHaveURL(/\/app\/client$/)
+  await check()
+})

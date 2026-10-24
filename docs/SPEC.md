@@ -65,7 +65,7 @@ São sete fases, e cada uma termina num portão com critério verificável. O pi
 
 Entregáveis e portão de cada fase:
 
-1. **Fase 0, Fundação.** Repositório, CI, Supabase local e na nuvem, Next.js com Tailwind e shadcn/ui, autenticação, papéis, RLS base, logger, Sentry, `CLAUDE.md` e `docs/SPEC.md`. **Portão:** CI verde, deploy de preview no ar, login com papéis e teste de RLS passando.
+1. **Fase 0, Fundação.** Repositório, CI, Supabase local e na nuvem, Next.js com Tailwind e shadcn/ui, autenticação, papéis, RLS base, logger, Sentry, `CLAUDE.md` e `docs/SPEC.md`. **Portão:** CI verde, deploy de preview no ar, login com papéis e teste de RLS passando. Login com papéis e RLS passam localmente; CI hospedado e preview seguem pendentes de contas externas (ADR-008).
 2. **Fase 1, Contas e catálogo.** Perfis, onboarding do dev com subconta e KYC no sandbox do Asaas, escrow configurado na subconta, pacotes com três níveis, curadoria e páginas públicas com SEO. **Portão:** dev aprovado publica pacote, visitante vê a página e dev sem KYC não consegue publicar.
 3. **Fase 2, Checkout e custódia.** `PaymentProvider` e adaptador Asaas, cobrança Pix e cartão com split, caixa de entrada de webhooks, ledger, estados até `paid` e conciliação diária. **Portão:** um pagamento no sandbox gera um único lançamento mesmo com o webhook entregue três vezes, e a conciliação não acusa divergência.
 4. **Fase 3, Execução do pedido.** Aceite, chat, entregas com versões, revisões, aprovação manual e automática, liberação da garantia, disputa e estornos. **Portão:** os quatro fluxos ponta a ponta passam (aprovação, revisão, disputa com reembolso parcial e reembolso total) e o ledger fecha em todos.

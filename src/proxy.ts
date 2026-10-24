@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { hardenCookieOptions } from '@/lib/auth/cookie-options'
 import { NextResponse, type NextRequest } from 'next/server'
 
 function buildCsp(nonce: string): string {
@@ -38,7 +39,7 @@ export async function proxy(request: NextRequest) {
           for (const { name, value } of items) request.cookies.set(name, value)
           response = NextResponse.next({ request: { headers } })
           for (const { name, value, options } of items) {
-            response.cookies.set(name, value, { ...options, httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
+            response.cookies.set(name, value, hardenCookieOptions(options))
           }
         },
       },

@@ -1,6 +1,8 @@
+import 'server-only'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+import { hardenCookieOptions } from '@/lib/auth/cookie-options'
 import { getPublicEnv } from '@/lib/env'
 
 /** Cliente Supabase com a sessão do usuário (cookies httpOnly). */
@@ -12,7 +14,7 @@ export async function createSupabaseServerClient() {
       getAll: () => store.getAll(),
       setAll(items) {
         try {
-          for (const { name, value, options } of items) store.set(name, value, options)
+          for (const { name, value, options } of items) store.set(name, value, hardenCookieOptions(options))
         } catch {
           // Chamado de um Server Component: o proxy atualiza a sessão.
         }

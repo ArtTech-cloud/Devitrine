@@ -6,6 +6,10 @@ let diff = ''
 try {
   diff = execSync(`git diff --name-status ${base}...HEAD -- db/migrations`, { encoding: 'utf8' })
 } catch {
+  if (process.env.CI === 'true') {
+    console.error(`Base ${base} indisponível no CI; a checagem de migrações não pode ser ignorada.`)
+    process.exit(1)
+  }
   console.log(`Base ${base} indisponível; checagem ignorada (o runner também valida checksum).`)
   process.exit(0)
 }

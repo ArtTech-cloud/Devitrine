@@ -119,6 +119,18 @@ describe('audit_log é append-only e restrito', () => {
     ).rejects.toThrow(/append-only|permission denied/)
   })
 
+  it('service_role não tem privilégio de UPDATE, DELETE nem TRUNCATE (migração 0005)', async () => {
+    await expect(
+      rawAs(null, (tx) => tx`update public.audit_log set action = 'x'`, 'service_role'),
+    ).rejects.toThrow(/permission denied/)
+    await expect(
+      rawAs(null, (tx) => tx`delete from public.audit_log`, 'service_role'),
+    ).rejects.toThrow(/permission denied/)
+    await expect(
+      rawAs(null, (tx) => tx`truncate public.audit_log`, 'service_role'),
+    ).rejects.toThrow(/permission denied/)
+  })
+
   it('usuário comum não lê nem escreve; admin com aal2 lê', async () => {
     const rows = await asUser(clientA, (db) => db.select().from(schema.auditLog))
     expect(rows).toHaveLength(0)

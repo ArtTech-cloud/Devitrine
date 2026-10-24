@@ -19,3 +19,7 @@ O papel (client, dev, admin) precisa ser lido pelo RLS e pela aplicação sem co
 - Nenhum caminho de cadastro público produz admin.
 - Perder o TOTP exige intervenção com service key; é intencional.
 - Os testes de RLS cobrem os três papéis e o admin com e sem `aal2`.
+
+## Limitação conhecida
+
+O primeiro cadastro de TOTP do admin (enrolamento) é protegido só pela senha: quem tem a senha do convite consegue registrar o próprio fator. Mitigação: o convite é enviado pelo dono por canal controlado e a senha inicial é trocada no primeiro acesso. Reforçar (link de enrolamento de uso único ou aprovação de outro admin) antes de abrir admins além do dono; registrar nova decisão quando isso entrar.

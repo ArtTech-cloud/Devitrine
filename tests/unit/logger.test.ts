@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Writable } from 'node:stream'
-import { MASK, createLogger, maskSensitive } from '@/lib/logger'
+import { MASK, createLogger, maskSensitive, maskString } from '@/lib/logger'
 
 function capture() {
   const lines: string[] = []
@@ -51,5 +51,46 @@ describe('máscara do logger', () => {
     expect(line).not.toContain('abc.def')
     expect(line).toContain('req-1')
     expect(line).toContain('ord-1')
+  })
+})
+
+describe('máscara do logger: vazamentos reportados pelo Vigia', () => {
+  const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.c2lnbmF0dXJlMTIz'
+
+  it('Error como 1º argumento: msg e stack saem sem o CPF', () => {
+    const { lines, logger } = capture()
+    logger.error(new Error('falha para cpf 123.456.789-09'))
+    const line = lines.join('')
+    expect(line).not.toContain('123.456.789-09')
+    expect(line).toContain(MASK)
+  })
+
+  it('Error dentro de objeto e com mensagem: stack mascarado', () => {
+    const { lines, logger } = capture()
+    logger.error({ err: new Error('doc 123.456.789-09') }, 'erro ao processar')
+    const line = lines.join('')
+    expect(line).not.toContain('123.456.789-09')
+    expect(line).toContain('erro ao processar')
+  })
+
+  it('mascara chaves bancárias em inglês e segredos extras', () => {
+    const out = maskSensitive({
+      accountNumber: '123', agency: '0001', routing: '021', jwt: JWT, dsn: 'https://x@sentry.io/1',
+      signature: 's', otp: '123456', totp: '654321', secret: 'x', visivel: 'ok',
+    }) as Record<string, string>
+    for (const k of ['accountNumber', 'agency', 'routing', 'jwt', 'dsn', 'signature', 'otp', 'totp', 'secret'])
+      expect(out[k], k).toBe(MASK)
+    expect(out.visivel).toBe('ok')
+  })
+
+  it('mascara JWT solto e padrões chave=valor em texto e URL', () => {
+    const text = `sessão ${JWT} em https://x.test/cb?access_token=abc123&apikey=k-999&ok=1 e token=abc senha: hunter2`
+    const out = maskString(text)
+    expect(out).not.toContain('eyJ')
+    expect(out).not.toContain('abc123')
+    expect(out).not.toContain('k-999')
+    expect(out).not.toContain('hunter2')
+    expect(out).not.toMatch(/token=abc\b/)
+    expect(out).toContain('ok=1')
   })
 })
