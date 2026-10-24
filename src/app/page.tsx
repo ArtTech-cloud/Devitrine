@@ -11,6 +11,9 @@ export default function Home() {
       </p>
       <div className="flex gap-3">
         <Button asChild>
+          <Link href="/pacotes">Ver pacotes</Link>
+        </Button>
+        <Button asChild variant="outline">
           <Link href="/signup">Criar conta</Link>
         </Button>
         <Button asChild variant="outline">

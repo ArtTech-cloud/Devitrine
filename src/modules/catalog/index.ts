@@ -11,6 +11,14 @@ export {
 } from './application/package-actions'
 export { getCategories, getOwnPackages, getOwnPackage, getPackageCurationQueue } from './application/package-queries'
 export {
+  getPublicPackages,
+  getPublicPackage,
+  getPublicPackagesByDev,
+  getPublicCategories,
+  getPublicPackageSlugs,
+} from './application/public-queries'
+export type { PublicPackage, PublicTier } from './infra/public-repository'
+export {
   TIERS,
   TIER_LABEL,
   PACKAGE_STATUS_LABEL,

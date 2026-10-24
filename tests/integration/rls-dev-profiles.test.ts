@@ -133,6 +133,11 @@ describe('vitrine pública public_dev_profiles', () => {
     const before = await rawAs(null, (tx) => tx`select * from public.public_dev_profiles where slug = ${s}`, 'anon')
     expect(before).toHaveLength(0)
     await setStatus(admin, d.id, 'approved')
+    const noKyc = await rawAs(null, (tx) => tx`select * from public.public_dev_profiles where slug = ${s}`, 'anon')
+    expect(noKyc).toHaveLength(0) // ADR-014: aprovado sem KYC aprovado continua fora da vitrine
+    await asService((db) =>
+      db.update(schema.devProfiles).set({ kycStatus: 'approved' }).where(eq(schema.devProfiles.userId, d.id)),
+    )
     const after = await rawAs(null, (tx) => tx`select * from public.public_dev_profiles where slug = ${s}`, 'anon')
     expect(after).toHaveLength(1)
     expect(Object.keys(after[0]!).sort()).toEqual(['bio', 'display_name', 'id', 'portfolio_links', 'slug'])

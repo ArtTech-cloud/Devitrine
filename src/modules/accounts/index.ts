@@ -18,6 +18,8 @@ export {
   listCurationQueue,
   getOwnDevProfile,
 } from './application/dev-actions'
+export { getPublicDev, getPublicDevSlugs } from './application/public-queries'
+export type { PublicDev } from './infra/public-devs-repository'
 export { ensureDevEscrow } from './application/escrow'
 export type { DevProfile, CurationRow } from './infra/dev-profiles-repository'
 export type { DevStatus } from './domain/dev-status'
