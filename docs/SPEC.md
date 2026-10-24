@@ -163,6 +163,7 @@ docs/             SPEC.md e decisions/
 - ADR-009: pendências externas da Fase 1 (sandbox do Asaas; KYC com adaptador fake) e marca provisória.
 - ADR-010: porta `RecipientGateway` em `accounts`, credenciais da subconta em `payments` e ponto de composição.
 - ADR-011: rate limit de login na aplicação, em Postgres.
+- ADR-012: onboarding do dev, KYC pela porta RecipientGateway e curadoria (reserva atômica, intervalo de 30 s, escrow só com dev e KYC aprovados).
 
 ## 6. Modelo de dados
 
@@ -180,7 +181,7 @@ O estado do negócio fica em tabelas normais e todo o dinheiro passa por um ledg
 | Tabela | Para que serve | Campos-chave |
 | --- | --- | --- |
 | `users` | Conta e papel | `id`, `email`, `role` (client, dev, admin), `mfa_enabled` |
-| `dev_profiles` | Perfil público e financeiro do dev | `user_id`, `slug`, `display_name`, `bio`, `portfolio_links`, `status` (pending, approved, suspended), `provider_account_id`, `wallet_id`, `kyc_status` (not_started, pending, approved, rejected), `kyc_link`, `escrow_enabled_at` |
+| `dev_profiles` | Perfil público e financeiro do dev | `user_id`, `slug`, `display_name`, `bio`, `portfolio_links`, `status` (pending, approved, suspended), `provider_account_id`, `wallet_id`, `kyc_status` (not_started, pending, approved, rejected), `kyc_link`, `escrow_enabled_at`, `kyc_checked_at` |
 | `recipient_credentials` | Chave de API cifrada da subconta (só `payments`, só service; ADR-010) | `dev_id`, `api_key_enc`, `key_version` |
 | `categories` | Nichos do catálogo | `slug`, `name` |
 | `packages` | Serviço publicado | `dev_id`, `category_id`, `title`, `status` (draft, in_review, published, paused) |

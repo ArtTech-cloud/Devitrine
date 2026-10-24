@@ -43,6 +43,7 @@ export const devProfiles = pgTable('dev_profiles', {
   walletId: text('wallet_id'),
   kycLink: text('kyc_link'),
   escrowEnabledAt: timestamp('escrow_enabled_at', { withTimezone: true }),
+  kycCheckedAt: timestamp('kyc_checked_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

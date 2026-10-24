@@ -45,3 +45,11 @@ export function formatBRL(cents: bigint): string {
   const rest = (abs % 100n).toString().padStart(2, '0')
   return `${negative ? '-' : ''}R$ ${reais},${rest}`
 }
+
+/** Lê "1.500,50", "1500,5" ou "1500" (reais) em centavos; devolve null se não for um valor válido. */
+export function parseBRL(input: string): bigint | null {
+  const text = input.trim().replace(/^R\$\s*/, '')
+  if (!/^\d{1,3}(\.\d{3})*(,\d{1,2})?$|^\d+(,\d{1,2})?$/.test(text)) return null
+  const [reais = '', frac = ''] = text.replace(/\./g, '').split(',')
+  return BigInt(reais) * 100n + BigInt(frac.padEnd(2, '0') || '0')
+}
