@@ -159,6 +159,10 @@ docs/             SPEC.md e decisions/
 - ADR-005: webhook vira registro na caixa de entrada e é processado por job, nunca na requisição.
 - ADR-006: papel em `public.users` por trigger; admin só por convite (service key) e com TOTP (`aal2`).
 - ADR-007: `withUser`/`withService` para acesso a dados, fronteira de módulo no lint e migrações SQL com checksum.
+- ADR-008: pendências externas da Fase 0 (CI, preview, Supabase cloud, Sentry) e endurecimento de auth.
+- ADR-009: pendências externas da Fase 1 (sandbox do Asaas; KYC com adaptador fake) e marca provisória.
+- ADR-010: porta `RecipientGateway` em `accounts`, credenciais da subconta em `payments` e ponto de composição.
+- ADR-011: rate limit de login na aplicação, em Postgres.
 
 ## 6. Modelo de dados
 
@@ -176,7 +180,8 @@ O estado do negócio fica em tabelas normais e todo o dinheiro passa por um ledg
 | Tabela | Para que serve | Campos-chave |
 | --- | --- | --- |
 | `users` | Conta e papel | `id`, `email`, `role` (client, dev, admin), `mfa_enabled` |
-| `dev_profiles` | Perfil público e financeiro do dev | `user_id`, `status` (pending, approved, suspended), `provider_account_id`, `wallet_id`, `kyc_status` |
+| `dev_profiles` | Perfil público e financeiro do dev | `user_id`, `slug`, `display_name`, `bio`, `portfolio_links`, `status` (pending, approved, suspended), `provider_account_id`, `wallet_id`, `kyc_status` (not_started, pending, approved, rejected), `kyc_link`, `escrow_enabled_at` |
+| `recipient_credentials` | Chave de API cifrada da subconta (só `payments`, só service; ADR-010) | `dev_id`, `api_key_enc`, `key_version` |
 | `categories` | Nichos do catálogo | `slug`, `name` |
 | `packages` | Serviço publicado | `dev_id`, `category_id`, `title`, `status` (draft, in_review, published, paused) |
 | `package_tiers` | Básico, Padrão, Premium | `package_id`, `tier`, `price_cents`, `delivery_days`, `revisions`, `scope_md` |
@@ -302,7 +307,7 @@ interface PaymentProvider {
 
 **Fluxo do dinheiro no Asaas**
 
-1. Onboarding do dev: a plataforma cria uma [subconta](https://docs.asaas.com/docs/criacao-de-subcontas) para ele e guarda `accountId`, `walletId` e a chave de API da subconta, cifrada (seção 10); o dev conclui o KYC pelo link de envio de documentos. Sem subconta aprovada, o pacote não é publicado.
+1. Onboarding do dev: a plataforma cria uma [subconta](https://docs.asaas.com/docs/criacao-de-subcontas) para ele e guarda `accountId` e `walletId` em `dev_profiles` e a chave de API da subconta, cifrada, em `recipient_credentials` (seção 10 e ADR-010); o dev conclui o KYC pelo link de envio de documentos. Sem subconta aprovada, o pacote não é publicado.
 2. A [conta escrow](https://docs.asaas.com/docs/habilitando-a-conta-escrow-para-as-subcontas) é ligada na subconta com `POST /v3/accounts/{id}/escrow` (`enabled`, `daysToExpire`, `isFeePayer`). Só recebimentos posteriores à configuração ficam retidos, então isso acontece antes da primeira venda.
 3. Checkout: `POST /v3/payments` com `billingType` `PIX` ou `CREDIT_CARD` e `split` com o `walletId` do dev e `fixedValue` = D. O restante fica na conta da plataforma.
 4. O [split](https://docs.asaas.com/docs/split-para-contas-com-conta-escrow) é calculado sobre o valor líquido da cobrança, depois das taxas. Por isso a plataforma usa `fixedValue` e garante `D ≤ netValue`; se o split passar do líquido, o Asaas [bloqueia o valor](https://docs.asaas.com/docs/split-de-pagamentos) e dá dois dias úteis para ajuste, depois dos quais cancela o split.
@@ -411,7 +416,7 @@ A plataforma não toca em dados de cartão, guarda o mínimo de dados pessoais e
 
 - Variáveis de ambiente no provedor de hospedagem; nada no código; `.env.example` sem valores.
 - Chaves separadas por ambiente (sandbox e produção), rotação a cada 90 dias e imediata em caso de suspeita. O token do webhook nunca é a API Key.
-- As chaves de API das subcontas do Asaas, usadas por exemplo para consultar a garantia de uma cobrança, ficam cifradas no banco e só o módulo `payments` as lê.
+- As chaves de API das subcontas do Asaas, usadas por exemplo para consultar a garantia de uma cobrança, ficam cifradas no banco, em `recipient_credentials` (AES-256-GCM, sem nenhum privilégio para `anon` e `authenticated`), e só o módulo `payments` as lê.
 - O logger mascara tokens, CPF, CNPJ e dados bancários.
 
 **LGPD**
