@@ -153,6 +153,35 @@ describe('KYC com o fake', () => {
   })
 })
 
+describe('reenvio do KYC recusado', () => {
+  it('dev recusado reenvia sem admin: nova subconta, escrow solto e tentativa contada', async () => {
+    const { actor, u } = await newDev()
+    const g = new FakeRecipientGateway()
+    await saveDevProfile(actor, profileInput)
+    await startKyc(actor, kycInput, g)
+    const firstAccount = (await row(u))?.providerAccountId
+    g.force(firstAccount!, 'rejected')
+    await refreshKyc(actor, g)
+    expect((await row(u))?.kycStatus).toBe('rejected')
+    const again = await startKyc(actor, kycInput, g)
+    expect(again.ok).toBe(true)
+    const p = await row(u)
+    expect(p?.kycStatus).toBe('pending')
+    expect(p?.kycAttempts).toBe(1)
+    expect(p?.providerAccountId).not.toBe(firstAccount)
+    expect(g.accounts.size).toBe(2)
+  })
+
+  it('só o KYC recusado pode reiniciar; pendente continua recusando o segundo início', async () => {
+    const { actor } = await newDev()
+    const g = new FakeRecipientGateway()
+    await saveDevProfile(actor, profileInput)
+    await startKyc(actor, kycInput, g)
+    expect((await startKyc(actor, kycInput, g)).ok).toBe(false)
+    expect(g.accounts.size).toBe(1)
+  })
+})
+
 describe('curadoria', () => {
   it('admin sem 2FA e transição inválida são recusados', async () => {
     const { actor, u } = await newDev()

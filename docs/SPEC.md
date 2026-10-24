@@ -181,7 +181,7 @@ O estado do negócio fica em tabelas normais e todo o dinheiro passa por um ledg
 | Tabela | Para que serve | Campos-chave |
 | --- | --- | --- |
 | `users` | Conta e papel | `id`, `email`, `role` (client, dev, admin), `mfa_enabled` |
-| `dev_profiles` | Perfil público e financeiro do dev | `user_id`, `slug`, `display_name`, `bio`, `portfolio_links`, `status` (pending, approved, suspended), `provider_account_id`, `wallet_id`, `kyc_status` (not_started, pending, approved, rejected), `kyc_link`, `escrow_enabled_at`, `kyc_checked_at` |
+| `dev_profiles` | Perfil público e financeiro do dev | `user_id`, `slug`, `display_name`, `bio`, `portfolio_links`, `status` (pending, approved, suspended), `provider_account_id`, `wallet_id`, `kyc_status` (not_started, pending, approved, rejected), `kyc_link`, `escrow_enabled_at`, `kyc_checked_at`, `kyc_attempts` |
 | `recipient_credentials` | Chave de API cifrada da subconta (só `payments`, só service; ADR-010) | `dev_id`, `api_key_enc`, `key_version` |
 | `categories` | Nichos do catálogo | `slug`, `name` |
 | `packages` | Serviço publicado | `dev_id`, `category_id`, `title`, `status` (draft, in_review, published, paused) |

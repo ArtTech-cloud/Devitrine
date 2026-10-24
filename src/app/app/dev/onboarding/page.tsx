@@ -31,8 +31,15 @@ export default async function DevOnboarding() {
       {profile && (
         <Card className="space-y-4">
           <h2 className="text-xl font-semibold">Verificação de identidade (KYC)</h2>
-          {profile.kycStatus === 'not_started' ? (
-            <KycForm action={startKycAction} />
+          {profile.kycStatus === 'not_started' || profile.kycStatus === 'rejected' ? (
+            <div className="space-y-4">
+              {profile.kycStatus === 'rejected' && (
+                <p role="alert" className="text-sm text-destructive">
+                  Sua verificação foi recusada. Confira os dados e envie de novo.
+                </p>
+              )}
+              <KycForm action={startKycAction} />
+            </div>
           ) : (
             <div className="space-y-2 text-sm">
               <p data-testid="kyc-state">Situação: {profile.kycStatus}</p>

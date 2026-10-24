@@ -16,6 +16,7 @@ export interface DevProfile {
   kycLink: string | null
   escrowEnabledAt: Date | null
   kycCheckedAt: Date | null
+  kycAttempts: number
   createdAt: Date
 }
 
@@ -39,6 +40,7 @@ function toProfile(r: Row): DevProfile {
     kycLink: r.kycLink,
     escrowEnabledAt: r.escrowEnabledAt,
     kycCheckedAt: r.kycCheckedAt,
+    kycAttempts: r.kycAttempts,
     createdAt: r.createdAt,
   }
 }
@@ -132,6 +134,35 @@ export async function releaseKycClaim(devId: string): Promise<void> {
       .set({ kycStatus: 'not_started' })
       .where(and(eq(schema.devProfiles.userId, devId), isNull(schema.devProfiles.providerAccountId))),
   )
+}
+
+/**
+ * KYC recusado: devolve o dev a `not_started` para reenviar os dados, sem admin (ADR-012).
+ * Solta a subconta recusada (o id antigo vai para o log) e o escrow, que pertencia a ela.
+ * Devolve o id da subconta solta, ou null se o KYC não estava recusado.
+ */
+export async function restartRejectedKyc(devId: string): Promise<{ previousAccountId: string | null } | null> {
+  return withService(async (db) => {
+    const [cur] = await db
+      .select()
+      .from(schema.devProfiles)
+      .where(and(eq(schema.devProfiles.userId, devId), eq(schema.devProfiles.kycStatus, 'rejected')))
+      .for('update')
+    if (!cur) return null
+    await db
+      .update(schema.devProfiles)
+      .set({
+        kycStatus: 'not_started',
+        providerAccountId: null,
+        walletId: null,
+        kycLink: null,
+        escrowEnabledAt: null,
+        kycCheckedAt: null,
+        kycAttempts: sql`${schema.devProfiles.kycAttempts} + 1`,
+      })
+      .where(eq(schema.devProfiles.userId, devId))
+    return { previousAccountId: cur.providerAccountId }
+  })
 }
 
 export async function saveRecipient(

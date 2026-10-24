@@ -15,6 +15,7 @@ import {
   markEscrowEnabled,
   pgCode,
   releaseKycClaim,
+  restartRejectedKyc,
   saveKycStatus,
   saveRecipient,
   setDevStatus,
@@ -84,7 +85,10 @@ export async function enableEscrowIfReady(devId: string, gateway: RecipientGatew
   return true
 }
 
-/** Cria a subconta do dev no gateway (uma vez) e guarda o link de verificação. */
+/**
+ * Cria a subconta do dev no gateway (uma vez por tentativa) e guarda o link de verificação.
+ * Com o KYC recusado, o dev reenvia os dados e uma nova tentativa começa (ADR-012).
+ */
 export async function startKyc(
   actor: Actor,
   input: KycInput,
@@ -93,12 +97,20 @@ export async function startKyc(
   const profile = await findOwnProfile(claimsOf(actor))
   if (!profile) return fail('Preencha o perfil antes de iniciar a verificação.')
   if (profile.status === 'suspended') return fail('Seu perfil está suspenso.')
+  let attempts = profile.kycAttempts
+  if (profile.kycStatus === 'rejected') {
+    const restarted = await restartRejectedKyc(actor.id)
+    if (restarted) {
+      attempts += 1
+      withContext({ requestId: newId() }).info({ previous: restarted.previousAccountId }, 'KYC recusado: reenvio iniciado')
+    }
+  }
   if (!(await claimKycStart(actor.id))) return fail('A verificação já foi iniciada.')
   try {
     const ref = await gateway.createRecipient({
       devUserId: actor.id,
       email: actor.email,
-      idempotencyKey: `kyc:${actor.id}`,
+      idempotencyKey: `kyc:${actor.id}:${attempts}`,
       ...input,
     })
     await saveRecipient(actor.id, ref)

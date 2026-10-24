@@ -1,4 +1,4 @@
-import { boolean, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 
 export const userRole = pgEnum('user_role', ['client', 'dev', 'admin'])
 
@@ -44,6 +44,7 @@ export const devProfiles = pgTable('dev_profiles', {
   kycLink: text('kyc_link'),
   escrowEnabledAt: timestamp('escrow_enabled_at', { withTimezone: true }),
   kycCheckedAt: timestamp('kyc_checked_at', { withTimezone: true }),
+  kycAttempts: integer('kyc_attempts').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
