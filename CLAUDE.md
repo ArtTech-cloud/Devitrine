@@ -2,7 +2,9 @@
 
 Marketplace de serviços digitais. Clientes compram pacotes fechados (Básico, Padrão, Premium) de devs independentes; a plataforma intermedeia a venda, segura o pagamento em custódia no gateway até a aprovação e fica com uma taxa. MVP: um nicho, em reais, clientes no Brasil, Pix e cartão.
 
-**Fase atual: 0 (Fundação).** Atualize esta linha quando o portão de uma fase passar.
+**Fase atual: 1 (Contas e Catálogo).** Atualize esta linha quando o portão de uma fase passar.
+
+O fechamento formal do portão da Fase 0 (CI hospedado e preview na Vercel) continua pendente de infraestrutura remota (ADR-008). A Fase 1 foi autorizada a começar porque todos os critérios técnicos locais e de segurança passaram.
 
 A especificação completa está em `docs/SPEC.md` e é a fonte da verdade do produto. Leia as seções da fase em andamento antes de planejar e não invente comportamento que não esteja lá. As seções 8 (gateway), 9 (webhooks) e 10 (segurança) são regras, não sugestões.
 

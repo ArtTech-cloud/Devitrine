@@ -28,3 +28,4 @@ Ao criar o projeto Supabase cloud (Auth → Providers/Policies): senha mínima d
 
 - O fechamento da Fase 0 depende de ação do dono (contas), não de código.
 - O E2E contra o preview também valida as flags de cookie em HTTPS.
+- Em 2026-10-24 a Fase 1 foi autorizada a começar com o portão local aprovado; o fechamento formal da Fase 0 segue pendente destas contas.
