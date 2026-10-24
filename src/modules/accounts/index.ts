@@ -18,6 +18,7 @@ export {
   listCurationQueue,
   getOwnDevProfile,
 } from './application/dev-actions'
+export { ensureDevEscrow } from './application/escrow'
 export type { DevProfile, CurationRow } from './infra/dev-profiles-repository'
 export type { DevStatus } from './domain/dev-status'
 export type { KycState } from './domain/recipient-gateway'

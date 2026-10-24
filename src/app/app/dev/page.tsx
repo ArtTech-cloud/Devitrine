@@ -27,8 +27,11 @@ export default async function DevArea() {
               Perfil <Badge data-testid="dev-status">{DEV_LABEL[profile.status]}</Badge> · Verificação{' '}
               <Badge data-testid="kyc-status">{KYC_LABEL[profile.kycStatus]}</Badge>
             </p>
-            <Link href="/app/dev/onboarding" className="text-sm underline">
+            <Link href="/app/dev/onboarding" className="block text-sm underline">
               Editar perfil e verificação
+            </Link>
+            <Link href="/app/dev/pacotes" className="block text-sm underline">
+              Meus pacotes
             </Link>
           </>
         ) : (

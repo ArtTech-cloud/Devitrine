@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { bigint, boolean, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 
 export const userRole = pgEnum('user_role', ['client', 'dev', 'admin'])
 
@@ -47,4 +47,54 @@ export const devProfiles = pgTable('dev_profiles', {
   kycAttempts: integer('kyc_attempts').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const packageStatus = pgEnum('package_status', ['draft', 'in_review', 'published', 'paused'])
+export const packageTier = pgEnum('package_tier', ['basic', 'standard', 'premium'])
+
+export const categories = pgTable('categories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  active: boolean('active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const packages = pgTable('packages', {
+  id: uuid('id').primaryKey(),
+  devId: uuid('dev_id').notNull(),
+  categoryId: uuid('category_id').notNull(),
+  slug: text('slug').notNull().unique(),
+  title: text('title').notNull(),
+  summary: text('summary').notNull(),
+  descriptionMd: text('description_md').notNull().default(''),
+  status: packageStatus('status').notNull().default('draft'),
+  rejectReason: text('reject_reason'),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const packageTiers = pgTable(
+  'package_tiers',
+  {
+    packageId: uuid('package_id').notNull(),
+    tier: packageTier('tier').notNull(),
+    priceCents: bigint('price_cents', { mode: 'bigint' }).notNull(),
+    deliveryDays: integer('delivery_days').notNull(),
+    revisions: integer('revisions').notNull(),
+    scopeMd: text('scope_md').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.packageId, t.tier] })],
+)
+
+export const packageCurationEvents = pgTable('package_curation_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  packageId: uuid('package_id').notNull(),
+  actorId: uuid('actor_id').notNull(),
+  fromStatus: packageStatus('from_status').notNull(),
+  toStatus: packageStatus('to_status').notNull(),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })

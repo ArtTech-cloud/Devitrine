@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseBRL } from '@/lib/money'
 import { documentKind, isValidCnpj, isValidCpf } from '@/modules/accounts/domain/document'
-import { isValidSlug, slugify, withSuffix } from '@/modules/accounts/domain/slug'
+import { isValidSlug, slugify, withSuffix } from '@/lib/slug'
 import {
   KYC_REFRESH_MIN_SECONDS,
   kycRetryAfterSeconds,

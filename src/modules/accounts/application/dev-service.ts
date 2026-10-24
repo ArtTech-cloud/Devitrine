@@ -3,7 +3,7 @@ import { withContext } from '@/lib/logger'
 import { newId } from '@/lib/ids'
 import { getNumberSetting } from '@/lib/settings'
 import { kycRetryAfterSeconds, normalizeKyc, shouldEnableEscrow, KYC_REFRESH_MIN_SECONDS } from '../domain/kyc'
-import { slugify, withSuffix } from '../domain/slug'
+import { slugify, withSuffix } from '@/lib/slug'
 import type { DevStatus } from '../domain/dev-status'
 import type { RecipientGateway } from '../domain/recipient-gateway'
 import {

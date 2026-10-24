@@ -164,6 +164,7 @@ docs/             SPEC.md e decisions/
 - ADR-010: porta `RecipientGateway` em `accounts`, credenciais da subconta em `payments` e ponto de composição.
 - ADR-011: rate limit de login na aplicação, em Postgres.
 - ADR-012: onboarding do dev, KYC pela porta RecipientGateway e curadoria (reserva atômica, intervalo de 30 s, escrow só com dev e KYC aprovados).
+- ADR-013: catálogo, pacotes com Básico obrigatório e até três níveis, trava de publicação e curadoria de pacotes (editar tira do ar).
 
 ## 6. Modelo de dados
 
@@ -183,9 +184,10 @@ O estado do negócio fica em tabelas normais e todo o dinheiro passa por um ledg
 | `users` | Conta e papel | `id`, `email`, `role` (client, dev, admin), `mfa_enabled` |
 | `dev_profiles` | Perfil público e financeiro do dev | `user_id`, `slug`, `display_name`, `bio`, `portfolio_links`, `status` (pending, approved, suspended), `provider_account_id`, `wallet_id`, `kyc_status` (not_started, pending, approved, rejected), `kyc_link`, `escrow_enabled_at`, `kyc_checked_at`, `kyc_attempts` |
 | `recipient_credentials` | Chave de API cifrada da subconta (só `payments`, só service; ADR-010) | `dev_id`, `api_key_enc`, `key_version` |
-| `categories` | Nichos do catálogo | `slug`, `name` |
-| `packages` | Serviço publicado | `dev_id`, `category_id`, `title`, `status` (draft, in_review, published, paused) |
-| `package_tiers` | Básico, Padrão, Premium | `package_id`, `tier`, `price_cents`, `delivery_days`, `revisions`, `scope_md` |
+| `categories` | Nichos do catálogo | `slug`, `name`, `active` |
+| `packages` | Serviço publicado | `dev_id`, `category_id`, `slug`, `title`, `summary`, `description_md`, `status` (draft, in_review, published, paused), `reject_reason`, `published_at` |
+| `package_tiers` | Básico (obrigatório), Padrão, Premium; PK `package_id + tier` | `package_id`, `tier`, `price_cents`, `delivery_days`, `revisions`, `scope_md` |
+| `package_curation_events` | Histórico da curadoria do pacote (append-only) | `package_id`, `actor_id`, `from_status`, `to_status`, `reason` |
 | `orders` | Pedido e estado atual | `client_id`, `dev_id`, `tier_id`, `snapshot`, `status`, `amount_cents`, `fee_bps`, `platform_fee_cents`, `dev_amount_cents`, `due_at`, `auto_approve_at` |
 | `order_events` | Linha do tempo e auditoria do pedido | `order_id`, `type`, `actor_id`, `from_status`, `to_status`, `payload` |
 | `messages` | Chat do pedido | `order_id`, `sender_id`, `body`, `attachments` |
@@ -428,6 +430,8 @@ A plataforma não toca em dados de cartão, guarda o mínimo de dados pessoais e
 - Encarregado (DPO) nomeado, com canal de contato público.
 
 **Curadoria e KYC de devs:** KYC feito pelo gateway na subconta, mais portfólio e teste prático. Dev suspenso não recebe pedidos novos e tem saques bloqueados enquanto houver disputa aberta.
+
+**Curadoria de pacotes (ADR-013):** o dev envia o rascunho para análise (exige dev e KYC aprovados e o nível Básico); o admin com 2FA publica (exige também escrow ligado) ou devolve com motivo. Editar um pacote fora de rascunho o devolve a rascunho. Dev suspenso some da vitrine.
 
 **Auditoria e alertas**
 

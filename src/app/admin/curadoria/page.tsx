@@ -1,15 +1,40 @@
 import { DecisionForm } from '@/components/dev-forms'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardTitle } from '@/components/ui/card'
+import { PackageDecisionForm } from '@/components/package-forms'
+import { formatBRL } from '@/lib/money'
 import { decideDevAction, listCurationQueue, requireRole } from '@/modules/accounts'
+import {
+  TIER_LABEL,
+  approvePackageAction,
+  getPackageCurationQueue,
+  rejectPackageAction,
+} from '@/modules/catalog'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CurationPage() {
   await requireRole('admin')
-  const devs = await listCurationQueue()
+  const [devs, packages] = await Promise.all([listCurationQueue(), getPackageCurationQueue('in_review')])
   return (
     <div className="space-y-4">
+      <CardTitle>Curadoria de pacotes</CardTitle>
+      {packages.length === 0 && <p className="text-sm text-muted-foreground">Nenhum pacote em análise.</p>}
+      {packages.map((p) => (
+        <Card key={p.id} className="space-y-2" data-testid="package-curation-row">
+          <p className="font-medium">{p.title}</p>
+          <p className="text-sm">{p.summary}</p>
+          {p.descriptionMd && <p className="whitespace-pre-line text-sm">{p.descriptionMd}</p>}
+          <ul className="text-sm">
+            {p.tiers.map((t) => (
+              <li key={t.tier}>
+                {TIER_LABEL[t.tier]}: {formatBRL(t.priceCents)} · {t.deliveryDays} dias · {t.revisions} revisões
+              </li>
+            ))}
+          </ul>
+          <PackageDecisionForm approve={approvePackageAction} reject={rejectPackageAction} packageId={p.id} />
+        </Card>
+      ))}
       <CardTitle>Curadoria de devs</CardTitle>
       {devs.length === 0 && <p className="text-sm text-muted-foreground">Nenhum dev cadastrado.</p>}
       {devs.map((d) => (
