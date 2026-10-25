@@ -1,5 +1,6 @@
 import { DecisionForm } from '@/components/dev-forms'
 import { Badge } from '@/components/ui/badge'
+import { Markdown } from '@/components/markdown'
 import { Card, CardTitle } from '@/components/ui/card'
 import { PackageDecisionForm } from '@/components/package-forms'
 import { formatBRL } from '@/lib/money'
@@ -24,7 +25,7 @@ export default async function CurationPage() {
         <Card key={p.id} className="space-y-2" data-testid="package-curation-row">
           <p className="font-medium">{p.title}</p>
           <p className="text-sm">{p.summary}</p>
-          {p.descriptionMd && <p className="whitespace-pre-line text-sm">{p.descriptionMd}</p>}
+          {p.descriptionMd && <Markdown source={p.descriptionMd} />}
           <ul className="text-sm">
             {p.tiers.map((t) => (
               <li key={t.tier}>

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
+import { Markdown } from '@/components/markdown'
 import { Card, CardTitle } from '@/components/ui/card'
 import { formatBRL } from '@/lib/money'
 import { absoluteUrl, jsonLd, priceForSchema } from '@/lib/seo'
@@ -71,7 +72,7 @@ export default async function PackagePage({ params }: { params: Promise<{ slug: 
           </Link>
         </p>
       </div>
-      {pkg.descriptionMd && <p className="whitespace-pre-line text-sm">{pkg.descriptionMd}</p>}
+      {pkg.descriptionMd && <Markdown source={pkg.descriptionMd} />}
       <section aria-label="Níveis do pacote" className="grid gap-4 sm:grid-cols-3">
         {pkg.tiers.map((t) => (
           <Card key={t.tier} className="space-y-2" data-testid={`public-tier-${t.tier}`}>
@@ -81,7 +82,7 @@ export default async function PackagePage({ params }: { params: Promise<{ slug: 
               {t.deliveryDays} {t.deliveryDays === 1 ? 'dia' : 'dias'} · {t.revisions}{' '}
               {t.revisions === 1 ? 'revisão' : 'revisões'}
             </p>
-            <p className="whitespace-pre-line text-sm">{t.scopeMd}</p>
+            <Markdown source={t.scopeMd} />
           </Card>
         ))}
       </section>

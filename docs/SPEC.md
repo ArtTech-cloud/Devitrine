@@ -165,7 +165,7 @@ docs/             SPEC.md e decisions/
 - ADR-011: rate limit de login na aplicação, em Postgres.
 - ADR-012: onboarding do dev, KYC pela porta RecipientGateway e curadoria (reserva atômica, intervalo de 30 s, escrow só com dev e KYC aprovados).
 - ADR-013: catálogo, pacotes com Básico obrigatório e até três níveis, trava de publicação e curadoria de pacotes (editar tira do ar).
-- ADR-014: páginas públicas (`/pacotes`, `/devs/[slug]`, sitemap, robots), SEO com JSON-LD, view `public_dev_profiles` exige KYC aprovado, texto do dev como texto puro.
+- ADR-014: páginas públicas (`/pacotes`, `/devs/[slug]`, sitemap, robots), SEO com JSON-LD, view `public_dev_profiles` exige KYC aprovado, Markdown do dev sanitizado por allowlist.
 
 ## 6. Modelo de dados
 
@@ -402,7 +402,7 @@ A plataforma não toca em dados de cartão, guarda o mínimo de dados pessoais e
 
 **Aplicação (OWASP)**
 
-- Entrada validada com Zod em toda Server Action e Route Handler; Markdown dos pacotes sanitizado por allowlist (MVP da Fase 1: descrição e escopo renderizados como texto puro, sem interpretar Markdown; ADR-014).
+- Entrada validada com Zod em toda Server Action e Route Handler; Markdown dos pacotes sanitizado por allowlist (`markdown-it` sem HTML bruto + `sanitize-html`; ADR-014).
 - Headers: CSP sem script inline, HSTS, `X-Frame-Options: DENY`, `Referrer-Policy` e `Permissions-Policy`.
 - Uploads: tipo e tamanho validados (até 50 MB), nome aleatório, bucket privado, URL assinada de 10 minutos e varredura de malware antes de liberar ao cliente.
 - Rate limit por IP e por usuário em login, checkout, chat e endpoints de webhook.
