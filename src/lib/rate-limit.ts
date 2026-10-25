@@ -3,6 +3,7 @@ import { createHmac } from 'node:crypto'
 import { headers } from 'next/headers'
 import { sql } from 'drizzle-orm'
 import { withService } from '@/lib/db'
+import { ipRateLimitKey } from '@/lib/ip'
 
 /** Limites do ADR-011: por IP e e-mail, e por IP. */
 export const LOGIN_LIMITS = { perIpEmail: 5, perIp: 30, windowSeconds: 15 * 60 } as const
@@ -28,10 +29,10 @@ export function rateLimitKey(scope: string, ...parts: string[]): string {
   return createHmac('sha256', secret).update([scope, ...parts].join('\n')).digest('hex')
 }
 
-/** IP do cliente. Só é confiável quando a hospedagem sobrescreve x-forwarded-for (Vercel); ver ADR-011. */
+/** IP do cliente (IPv6 reduzido ao /64). Só é confiável quando a hospedagem sobrescreve x-forwarded-for (Vercel); ver ADR-011. */
 export async function clientIp(): Promise<string> {
   const h = await headers()
-  return h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip')?.trim() || 'unknown'
+  return ipRateLimitKey(h.get('x-forwarded-for')?.split(',')[0] || h.get('x-real-ip') || '')
 }
 
 /** `true` quando a tentativa de login ou cadastro pode seguir. Em falha do banco, nega (fail closed). */

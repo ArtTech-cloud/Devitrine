@@ -48,4 +48,24 @@ describe('renderMarkdown', () => {
   it('mantém mailto e http', () => {
     expect(renderMarkdown('[a](mailto:a@b.com) [b](http://b.com)')).toMatch(/href="mailto:a@b\.com".*href="http:\/\/b\.com"/)
   })
+
+  it.each([
+    '[x](java&#x0A;script:alert(1))',
+    '[x](jav&#x09;ascript:alert(1))',
+    '[x](%6Aavascript:alert(1))',
+    '[x](&#0000106avascript:alert(1))',
+    '[x](<javascript:alert(1)>)',
+    '[x][r]\n\n[r]: javascript:alert(1)',
+    '![x](javascript:alert(1))',
+  ])('esquema ofuscado não vira link executável: %s', (src) => {
+    const html = renderMarkdown(src)
+    for (const [, href] of html.matchAll(/href="([^"]*)"/g)) {
+      expect(href!.replace(/[\u0000- ]/g, '')).not.toMatch(/^(javascript|vbscript|data):/i)
+    }
+  })
+
+  it('código e citação mantêm HTML como texto', () => {
+    const html = renderMarkdown('```html\n<script>alert(1)</script>\n```\n\n`</code><script>1</script>`\n\n> <b onclick=1>q</b>')
+    expect(html).not.toMatch(/<(script|b)[\s>]/i)
+  })
 })

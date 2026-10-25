@@ -28,3 +28,8 @@ Hoje só valem os limites nativos do Supabase Auth; a aplicação não limita te
 - **Fail closed:** se o contador falhar (banco fora), a tentativa é negada e o erro vai para o log. Login depende do mesmo banco, então o custo é baixo.
 - Login bem-sucedido também conta na janela; não há reset em caso de sucesso (MVP).
 - No E2E, o Playwright manda um `x-forwarded-for` próprio por execução, para execuções seguidas não dividirem o contador de IP.
+
+## Revisão do Vigia (Fase 1)
+
+- O IP entra na chave via `ipRateLimitKey` (`src/lib/ip.ts`): IPv4 como veio, IPv4 mapeado em IPv6 vira IPv4, IPv6 vira o prefixo /64 (quem tem uma rede IPv6 controla 2^64 endereços; sem isso, trocar o final do endereço zerava os dois contadores). Valor que não é IP (header forjado, vazio) cai no balde único `unknown`. Limitação conhecida: sem proxy que defina o header (ambiente local ou outra hospedagem), todos compartilham o balde `unknown` (30 tentativas por 15 minutos para todo mundo); na Vercel isso não ocorre.
+- Não existe limite por e-mail somando todos os IPs: um ataque distribuído contra uma conta só depende do limite próprio do Supabase Auth. Reavaliar com WAF ou Upstash na infraestrutura de borda.
