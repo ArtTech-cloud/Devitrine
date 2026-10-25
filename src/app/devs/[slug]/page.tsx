@@ -27,23 +27,24 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 export default async function DevPublicPage({ params }: { params: Promise<{ slug: string }> }) {
   const dev = await load((await params).slug)
   if (!dev) notFound()
-  const packages = await getPublicPackagesByDev(dev.id)
+  const links = dev.portfolioLinks.filter((l) => /^https?:\/\//i.test(l))
+  const packages = await getPublicPackagesByDev(dev.slug)
   const structured = {
     '@context': 'https://schema.org',
     '@type': 'Person',
     name: dev.displayName,
     url: absoluteUrl(`/devs/${dev.slug}`),
     description: dev.bio || undefined,
-    sameAs: dev.portfolioLinks,
+    sameAs: links,
   }
   return (
     <div className="space-y-4">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
       <CardTitle>{dev.displayName}</CardTitle>
       {dev.bio && <p className="whitespace-pre-line text-sm">{dev.bio}</p>}
-      {dev.portfolioLinks.length > 0 && (
+      {links.length > 0 && (
         <ul className="list-disc pl-5 text-sm">
-          {dev.portfolioLinks.map((l) => (
+          {links.map((l) => (
             <li key={l}>
               <a href={l} className="underline" target="_blank" rel="noreferrer noopener nofollow ugc">
                 {l}

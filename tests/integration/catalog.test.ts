@@ -303,7 +303,7 @@ describe('ciclo de vida e vitrine pública', () => {
     const { id } = await publishedPackage()
     const row = await rawAs(null, async (tx) => (await tx`select * from public_packages where id = ${id}`)[0], 'anon')
     expect(Object.keys(row ?? {}).sort()).toEqual(
-      ['category_name', 'category_slug', 'description_md', 'dev_id', 'dev_name', 'dev_slug', 'id', 'published_at', 'slug', 'summary', 'title'],
+      ['category_name', 'category_slug', 'description_md', 'dev_name', 'dev_slug', 'id', 'published_at', 'slug', 'summary', 'title'],
     )
   })
 

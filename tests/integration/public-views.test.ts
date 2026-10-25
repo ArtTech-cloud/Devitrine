@@ -46,3 +46,57 @@ describe('public_dev_profiles', () => {
     await expect(rawAs(null, (tx) => tx`select user_id from dev_profiles`, 'anon')).rejects.toThrow()
   })
 })
+
+describe('views públicas são somente leitura (ADR-014)', () => {
+  const views = ['public_dev_profiles', 'public_packages', 'public_package_tiers']
+  const roles = ['anon', 'authenticated'] as const
+
+  it('anon e authenticated só têm SELECT', async () => {
+    const privs = ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
+    for (const v of views) {
+      for (const r of roles) {
+        const sqlText = `select ${privs.map((p) => `has_table_privilege('${r}', 'public.${v}', '${p}')`).join(' or ')} as w, has_table_privilege('${r}', 'public.${v}', 'SELECT') as sel`
+        const [row] = await rawAs(null, (tx) => tx.unsafe(sqlText), 'anon')
+        expect(row!.w, `${r} em ${v}`).toBe(false)
+        expect(row!.sel).toBe(true)
+      }
+    }
+  })
+
+  it('escrita via view falha com permission denied', async () => {
+    for (const role of roles) {
+      await expect(
+        rawAs(null, (tx) => tx`update public_dev_profiles set bio = 'HACKED'`, role),
+      ).rejects.toThrow(/permission denied/)
+      await expect(
+        rawAs(null, (tx) => tx`delete from public_dev_profiles`, role),
+      ).rejects.toThrow(/permission denied/)
+      await expect(
+        rawAs(null, (tx) => tx`insert into public_dev_profiles (id, slug, display_name) values (gen_random_uuid(), 'x', 'x')`, role),
+      ).rejects.toThrow(/permission denied/)
+    }
+  })
+
+  it('public_packages não expõe dev_id', async () => {
+    const cols = await rawAs(
+      null,
+      (tx) => tx`select column_name from information_schema.columns where table_name = 'public_packages' and table_schema = 'public'`,
+      'anon',
+    )
+    expect(cols.map((c) => c.column_name as string)).not.toContain('dev_id')
+  })
+
+  it('CHECK recusa portfolio_links que não seja http(s)', async () => {
+    const u = await devWith('approved', 'approved')
+    for (const bad of ['javascript:alert(1)', 'ftp://x', ' https://x']) {
+      await expect(
+        asService((db) =>
+          db.update(schema.devProfiles).set({ portfolioLinks: [bad] }).where(eq(schema.devProfiles.userId, u.id)),
+        ),
+      ).rejects.toThrow()
+    }
+    await asService((db) =>
+      db.update(schema.devProfiles).set({ portfolioLinks: ['https://ok.dev'] }).where(eq(schema.devProfiles.userId, u.id)),
+    )
+  })
+})

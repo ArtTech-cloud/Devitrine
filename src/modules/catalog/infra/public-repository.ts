@@ -19,7 +19,6 @@ export interface PublicPackage {
   publishedAt: Date
   categorySlug: string
   categoryName: string
-  devId: string
   devSlug: string
   devName: string
   tiers: PublicTier[]
@@ -34,7 +33,6 @@ type PkgRow = {
   published_at: Date
   category_slug: string
   category_name: string
-  dev_id: string
   dev_slug: string
   dev_name: string
 }
@@ -69,7 +67,6 @@ async function load(where: ReturnType<typeof sql>, limit = 100): Promise<PublicP
       publishedAt: new Date(p.published_at),
       categorySlug: p.category_slug,
       categoryName: p.category_name,
-      devId: p.dev_id,
       devSlug: p.dev_slug,
       devName: p.dev_name,
       tiers: tiers
@@ -93,7 +90,7 @@ export async function findPublicPackage(slug: string): Promise<PublicPackage | n
   return (await load(sql`where slug = ${slug}`, 1))[0] ?? null
 }
 
-export const listPublicPackagesByDev = (devId: string) => load(sql`where dev_id = ${devId}::uuid`)
+export const listPublicPackagesByDev = (devSlug: string) => load(sql`where dev_slug = ${devSlug}`)
 
 export async function listPublicCategories(): Promise<{ slug: string; name: string }[]> {
   const rows = await withService((db) =>
