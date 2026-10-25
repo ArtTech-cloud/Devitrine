@@ -2,7 +2,7 @@
 
 Marketplace de serviços digitais. Clientes compram pacotes fechados (Básico, Padrão, Premium) de devs independentes; a plataforma intermedeia a venda, segura o pagamento em custódia no gateway até a aprovação e fica com uma taxa. MVP: um nicho, em reais, clientes no Brasil, Pix e cartão.
 
-**Fase atual: 1 (Contas e Catálogo).** Atualize esta linha quando o portão de uma fase passar.
+**Fase atual: 2 (Checkout e Custódia).** Portão da Fase 1 confirmado pelo Atlas em 2026-10-25 como portão local: o CI hospedado e o preview na Vercel seguem pendentes (ADR-008 e ADR-009), então o CI não está declarado verde. Atualize esta linha quando o portão de uma fase passar.
 
 O fechamento formal do portão da Fase 0 (CI hospedado e preview na Vercel) continua pendente de infraestrutura remota (ADR-008). A Fase 1 foi autorizada a começar porque todos os critérios técnicos locais e de segurança passaram.
 

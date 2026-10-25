@@ -25,3 +25,9 @@ O portão da Fase 1 exige que o visitante veja a página do pacote publicado. A 
 - Dev aprovado sem KYC aprovado deixa de aparecer em `/devs/[slug]` (antes aparecia na view da 0006); o teste de RLS da etapa 1 foi ajustado.
 - Páginas dinâmicas consultam o banco a cada requisição; cache/ISR fica para quando houver volume.
 - Sem imagem Open Graph no MVP (não há upload de capa de pacote na SPEC).
+
+## Pendências abertas (fechamento do portão da Fase 1)
+
+- 500 intermitente em `/pacotes/<inexistente>`, visto uma vez e não reproduzido. Se voltar, abrir teste E2E de regressão.
+- Baixas da revisão de QA, não bloqueantes: sem proxy que defina o IP, todos caem no balde `unknown` do rate limit (na Vercel não ocorre); sem limite por e-mail somando todos os IPs; `dev_is_active` serve de oráculo de UUID; páginas públicas sem cache; sem teto de pacotes por dev; links relativos aceitos no Markdown.
+- `pnpm db:check` só roda com `origin/main`; rodar no primeiro push e tratar falha como bloqueio de merge.
