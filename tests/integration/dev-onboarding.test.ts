@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { schema } from '@/lib/db'
 import { asService, createUser, DATABASE_URL, type TestUser } from './harness'
@@ -72,6 +72,41 @@ describe('perfil do dev', () => {
     const r = await saveDevProfile({ id: c.id, email: c.email, aal: c.aal }, profileInput)
     expect(r.ok).toBe(false)
     expect(await row(c)).toBeUndefined()
+  })
+
+  it('dev aprovado que troca o nome volta a pending e é auditado; bio e links não mexem no status (ADR-016)', async () => {
+    const { actor, u } = await newDev()
+    const g = new FakeRecipientGateway()
+    const adm = { id: admin.id, email: admin.email, aal: 'aal2' as const }
+    await saveDevProfile(actor, profileInput)
+    await decideDev(adm, u.id, 'approved', 'ok', g)
+    const keep = await saveDevProfile(actor, { ...profileInput, bio: 'Outra bio', portfolioLinks: ['https://b.dev'] })
+    expect(keep.ok && keep.value.sentToReview).toBe(false)
+    expect((await row(u))?.status).toBe('approved')
+    const same = await saveDevProfile(actor, { ...profileInput, bio: 'Outra bio', portfolioLinks: ['https://b.dev'] })
+    expect(same.ok && same.value.sentToReview).toBe(false)
+    expect((await row(u))?.status).toBe('approved')
+    const renamed = await saveDevProfile(actor, { ...profileInput, displayName: 'Outra Marca' })
+    expect(renamed.ok && renamed.value.sentToReview).toBe(true)
+    expect((await row(u))?.status).toBe('pending')
+    expect((await row(u))?.displayName).toBe('Outra Marca')
+    const audits = await asService((db) =>
+      db.execute(sql`select diff from audit_log where entity_id = ${u.id} and action = 'dev.rename_review'`),
+    )
+    expect(JSON.stringify([...audits])).toContain('Outra Marca')
+    // Pendente de novo: renomear outra vez não gera nova transição e o admin reaprova.
+    await saveDevProfile(actor, { ...profileInput, displayName: 'Terceiro Nome' })
+    expect((await row(u))?.status).toBe('pending')
+    expect((await decideDev(adm, u.id, 'approved', 'ok', g)).ok).toBe(true)
+    expect((await row(u))?.status).toBe('approved')
+  })
+
+  it('dev pending que troca o nome continua pending', async () => {
+    const { actor, u } = await newDev()
+    await saveDevProfile(actor, profileInput)
+    const r = await saveDevProfile(actor, { ...profileInput, displayName: 'Novo Nome' })
+    expect(r.ok && r.value.sentToReview).toBe(false)
+    expect((await row(u))?.status).toBe('pending')
   })
 
   it('dev suspenso não edita o perfil', async () => {

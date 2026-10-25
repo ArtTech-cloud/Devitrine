@@ -16,6 +16,9 @@ export async function saveDevProfileAction(_: FormState, formData: FormData): Pr
   const res = await saveDevProfile(user, parsed.data)
   if (!res.ok) return { error: res.error }
   revalidatePath('/app/dev')
+  if (res.value.sentToReview) {
+    return { info: 'Perfil salvo. Como o nome mudou, seu perfil e seus pacotes saem da vitrine até nova análise.' }
+  }
   return { info: 'Perfil salvo.' }
 }
 

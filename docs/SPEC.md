@@ -166,6 +166,8 @@ docs/             SPEC.md e decisions/
 - ADR-012: onboarding do dev, KYC pela porta RecipientGateway e curadoria (reserva atômica, intervalo de 30 s, escrow só com dev e KYC aprovados).
 - ADR-013: catálogo, pacotes com Básico obrigatório e até três níveis, trava de publicação e curadoria de pacotes (editar tira do ar).
 - ADR-014: páginas públicas (`/pacotes`, `/devs/[slug]`, sitemap, robots), SEO com JSON-LD, view `public_dev_profiles` exige KYC aprovado, Markdown do dev sanitizado por allowlist.
+- ADR-015: default privileges fechados em `public` e teste-guarda de grants.
+- ADR-016: dev aprovado que troca o nome de exibição volta para `pending` e sai da vitrine até nova curadoria (gatilho no banco, auditado); bio e links seguem livres.
 
 ## 6. Modelo de dados
 
@@ -435,6 +437,8 @@ A plataforma não toca em dados de cartão, guarda o mínimo de dados pessoais e
 **Curadoria de pacotes (ADR-013):** o dev envia o rascunho para análise (exige dev e KYC aprovados e o nível Básico); o admin com 2FA publica (exige também escrow ligado) ou devolve com motivo. Editar um pacote fora de rascunho o devolve a rascunho. Dev suspenso some da vitrine.
 
 **Páginas públicas (ADR-014):** vitrine em `/pacotes`, página do pacote em `/pacotes/[slug]` (title, description, canonical, Open Graph e JSON-LD `Service`) e perfil em `/devs/[slug]`; só pacote publicado de dev aprovado com KYC aprovado aparece, o resto responde 404. `sitemap.xml` e `robots.txt` gerados.
+
+**Edição do perfil (ADR-016):** o dev aprovado edita bio e links livremente; trocar o nome de exibição o devolve a `pending` e tira perfil e pacotes da vitrine até o admin aprovar de novo.
 
 **Auditoria e alertas**
 

@@ -37,7 +37,10 @@ const fail = (error: string): ServiceResult<never> => ({ ok: false, error })
 const claimsOf = (a: Actor): UserClaims => ({ sub: a.id, aal: a.aal ?? 'aal1' })
 
 /** Cria o perfil (slug derivado do nome, com sufixo se já existir) ou atualiza o existente. */
-export async function saveDevProfile(actor: Actor, input: DevProfileInput): Promise<ServiceResult<DevProfile>> {
+export async function saveDevProfile(
+  actor: Actor,
+  input: DevProfileInput,
+): Promise<ServiceResult<DevProfile & { sentToReview: boolean }>> {
   const claims = claimsOf(actor)
   const current = await findOwnProfile(claims)
   if (current) {
@@ -58,7 +61,9 @@ export async function saveDevProfile(actor: Actor, input: DevProfileInput): Prom
     }
   }
   const profile = await findOwnProfile(claims)
-  return profile ? ok(profile) : fail('Não foi possível salvar o perfil.')
+  if (!profile) return fail('Não foi possível salvar o perfil.')
+  // O gatilho do banco devolve a `pending` o dev aprovado que troca o nome (ADR-016).
+  return ok({ ...profile, sentToReview: current?.status === 'approved' && profile.status === 'pending' })
 }
 
 /** Liga o escrow da subconta quando as duas condições (curadoria e KYC) estão atendidas. */
