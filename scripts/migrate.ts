@@ -11,8 +11,15 @@ export async function migrate(databaseUrl: string): Promise<string[]> {
   const sql = postgres(databaseUrl, { max: 1, onnotice: () => {} })
   const applied: string[] = []
   try {
+    // Já nasce protegida (ADR-015): RLS ligada e sem acesso para a API. O runner usa o dono do banco.
     await sql`create table if not exists public._migrations (
       name text primary key, checksum text not null, applied_at timestamptz not null default now())`
+    await sql`alter table public._migrations enable row level security`
+    await sql`revoke all on public._migrations from public`
+    for (const role of ['anon', 'authenticated']) {
+      const [r] = await sql`select 1 as ok from pg_roles where rolname = ${role}`
+      if (r) await sql.unsafe(`revoke all on public._migrations from ${role}`)
+    }
     const files = readdirSync(DIR)
       .filter((f) => f.endsWith('.sql'))
       .sort()
