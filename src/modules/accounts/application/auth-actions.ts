@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { createSupabaseServerClient } from '@/lib/auth/supabase'
 import { withContext } from '@/lib/logger'
+import { allowAuthAttempt, clientIp } from '@/lib/rate-limit'
 import { newId } from '@/lib/ids'
 import { signInSchema, signUpSchema, totpCodeSchema } from './schemas'
 import { getCurrentUser } from './current-user'
@@ -12,9 +13,25 @@ export interface FormState {
   info?: string
 }
 
+const TOO_MANY = 'Muitas tentativas. Aguarde alguns minutos e tente de novo.'
+
+/** Rate limit antes do Supabase Auth (ADR-011); se o contador falhar, nega em vez de liberar. */
+async function throttled(action: 'signin' | 'signup', email: string): Promise<boolean> {
+  const ip = await clientIp()
+  try {
+    if (await allowAuthAttempt(action, ip, email)) return false
+  } catch (e) {
+    withContext({ requestId: newId() }).error({ err: e, action }, 'rate limit indisponível')
+    return true
+  }
+  withContext({ requestId: newId() }).warn({ action }, 'login bloqueado por rate limit')
+  return true
+}
+
 export async function signUpAction(_: FormState, formData: FormData): Promise<FormState> {
   const parsed = signUpSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Dados inválidos' }
+  if (await throttled('signup', parsed.data.email)) return { error: TOO_MANY }
   const supabase = await createSupabaseServerClient()
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
@@ -32,6 +49,7 @@ export async function signUpAction(_: FormState, formData: FormData): Promise<Fo
 export async function signInAction(_: FormState, formData: FormData): Promise<FormState> {
   const parsed = signInSchema.safeParse(Object.fromEntries(formData))
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Dados inválidos' }
+  if (await throttled('signin', parsed.data.email)) return { error: TOO_MANY }
   const supabase = await createSupabaseServerClient()
   const { error } = await supabase.auth.signInWithPassword(parsed.data)
   if (error) return { error: 'E-mail ou senha incorretos.' }

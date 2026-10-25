@@ -3,6 +3,9 @@ import { config as loadEnv } from 'dotenv'
 
 loadEnv({ path: '.env.local', quiet: true })
 
+// IP próprio por execução: sem x-forwarded-for o rate limit (ADR-011) junta todas as execuções num IP só.
+const runIp = `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`
+
 const baseURL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:3000'
 
 export default defineConfig({
@@ -11,7 +14,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
-  use: { baseURL, trace: 'retain-on-failure' },
+  use: { baseURL, extraHTTPHeaders: { 'x-forwarded-for': runIp }, trace: 'retain-on-failure' },
   // No deploy de preview, E2E_BASE_URL aponta para a URL do preview e não sobe servidor.
   webServer: process.env.E2E_BASE_URL
     ? undefined
