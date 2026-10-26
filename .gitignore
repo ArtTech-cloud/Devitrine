@@ -11,3 +11,7 @@ next-env.d.ts
 supabase/.temp
 supabase/.branches
 .sentryclirc
+
+.vercel
+.env*
+!.env.example
