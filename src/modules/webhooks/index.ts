@@ -1,5 +1,6 @@
 // API pública do módulo webhooks: caixa de entrada, processamento, varredura e reprocesso (SPEC §9, ADR-005, ADR-020).
 export { receiveWebhook } from './application/receive'
+export { handleWebhookRequest } from './application/handle-request'
 export type { ReceiveResult } from './application/receive'
 export { processWebhookEvent } from './application/process'
 export type { ProcessResult } from './application/process'
@@ -15,3 +16,7 @@ export {
   WebhookDeadError,
 } from './domain/policy'
 export type { WebhookStatus } from './domain/policy'
+export { readBodyWithLimit } from './domain/body-limit'
+export type { ReadBodyResult } from './domain/body-limit'
+export { AUTH_FAILURE_ALERT_WINDOW_MS, createAuthFailureThrottle } from './domain/auth-failures'
+export type { AuthFailureDecision, AuthFailureThrottle } from './domain/auth-failures'

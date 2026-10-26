@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { sql } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { OrderPaymentEffects, PaymentAlert } from '@/modules/payments'
 import type { WebhookDeps } from '@/modules/webhooks'
 import { FakeRecipientGateway } from '@/modules/accounts/infra/fake-recipient-gateway'
@@ -13,8 +13,20 @@ process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'test-service-key'
 const { createOrderCharge, paymentConfirmedKey, PaymentProviderError, reconcilePayments } = await import(
   '@/modules/payments'
 )
-const { MAX_ATTEMPTS, processWebhookEvent, receiveWebhook, reprocessWebhook, sweepStuckWebhooks, WebhookDeadError } =
-  await import('@/modules/webhooks')
+const {
+  createAuthFailureThrottle,
+  handleWebhookRequest,
+  MAX_ATTEMPTS,
+  processWebhookEvent,
+  receiveWebhook,
+  reprocessWebhook,
+  sweepStuckWebhooks,
+  WebhookDeadError,
+} = await import('@/modules/webhooks')
+const { isAdminUser } = await import('@/lib/auth/admin')
+const { isUuidV7 } = await import('@/lib/ids')
+const { logger } = await import('@/lib/logger')
+const { withProviderTimeout } = await import('@/modules/payments/infra/timeout-payment-provider')
 const { schema } = await import('@/lib/db')
 const { paymentConfirmed, postLedgerTx } = await import('@/modules/ledger')
 
@@ -41,6 +53,7 @@ function setup(opts: { enqueueFails?: boolean; createDelayMs?: number } = {}) {
   const alerts: PaymentAlert[] = []
   const queue: string[] = []
   const state = { enqueueFails: opts.enqueueFails ?? false }
+  const clock = { now: 1_000_000 }
   const deps: WebhookDeps = {
     provider,
     orders,
@@ -50,8 +63,10 @@ function setup(opts: { enqueueFails?: boolean; createDelayMs?: number } = {}) {
       queue.push(...ids)
     },
     run: (fn) => asService(fn),
+    isAdmin: isAdminUser,
+    authFailures: createAuthFailureThrottle(60_000, () => clock.now),
   }
-  return { provider, orders, alerts, queue, state, deps }
+  return { provider, orders, alerts, queue, state, clock, deps }
 }
 type Ctx = ReturnType<typeof setup>
 
@@ -399,15 +414,22 @@ describe('reembolso, chargeback e divergência de split', () => {
     expect(mine(ctx, report.divergences).map((d) => d.kind)).toEqual(['unbooked_reversal'])
   })
 
-  it('split bloqueado por divergência gera alerta crítico', async () => {
+  it('split acima do líquido: o gateway bloqueia, a confirmação falha fechado e há alerta crítico (L4)', async () => {
     const ctx = setup()
     // Parte do dev acima do líquido do Pix (9.901): o gateway bloqueia o split.
     const c = await newCharge(ctx, { devAmountCents: 9_950n })
     expect(ctx.alerts.some((a) => a.code === 'split_exceeds_net')).toBe(true)
+    const before = ctx.alerts.length
     for (const e of ctx.provider.simulatePayment(c.charge.providerPaymentId)) await deliver(ctx, e)
-    await drain(ctx)
-    expect((await paymentRow(c.charge.providerPaymentId)).split_status).toBe('blocked')
-    expect(ctx.alerts.some((a) => a.code === 'split_divergence_block' && a.severity === 'critical')).toBe(true)
+    expect((await drain(ctx)).length).toBeGreaterThan(0)
+    // Nada é confirmado nem lançado enquanto a parte do dev não couber no líquido (ADR-020 item 22).
+    const row = await paymentRow(c.charge.providerPaymentId)
+    expect(row.confirmed_at).toBeNull()
+    expect(ctx.orders.confirmed).toEqual([])
+    expect(await ledgerTxCount(paymentConfirmedKey('fake', c.charge.providerPaymentId))).toBe(0)
+    expect(
+      ctx.alerts.slice(before).some((a) => a.code === 'split_exceeds_net' && a.severity === 'critical'),
+    ).toBe(true)
   })
 
   it('cobrança vencida cancela o pedido; repetir não cancela de novo', async () => {
@@ -893,5 +915,306 @@ describe('L5: colunas imutáveis de payments', () => {
     await expect(update("confirmed_at = now() + interval '1 day'")).rejects.toThrow()
     await update("status = 'refunded'")
     expect((await paymentRow(pid)).status).toBe('refunded')
+  })
+})
+
+/** Captura o que a aplicação manda ao logger durante `fn` (os filhos de `withContext` caem aqui). */
+async function captureLogs<T>(fn: () => Promise<T>) {
+  const lines: { level: string; fields: Record<string, unknown>; msg: string }[] = []
+  const record = (level: string) => (fields: unknown, msg?: string) =>
+    lines.push({ level, fields: (fields ?? {}) as Record<string, unknown>, msg: msg ?? '' })
+  const child = { info: record('info'), warn: record('warn'), error: record('error'), debug: record('debug') }
+  const spy = vi.spyOn(logger, 'child').mockReturnValue(child as never)
+  try {
+    return { result: await fn(), lines }
+  } finally {
+    spy.mockRestore()
+  }
+}
+
+const webhookRequest = (body: BodyInit | null, headers: HeadersInit = {}) =>
+  new Request('http://localhost/api/webhooks/asaas', {
+    method: 'POST',
+    body,
+    headers,
+    ...(body && typeof body !== 'string' ? { duplex: 'half' } : {}),
+  } as RequestInit)
+
+const storedEvents = () =>
+  asService(
+    async (db) => (await db.execute<{ n: number }>(sql`select count(*)::int n from public.webhook_events`))[0]!.n,
+  )
+
+describe('L1: corpo grande é recusado antes de autenticar', () => {
+  it('Content-Length acima de 1 MB e corpo em stream sem cabeçalho dão 413, sem gravar nem enfileirar', async () => {
+    const ctx = setup()
+    const before = await storedEvents()
+    const declared = await handleWebhookRequest(
+      webhookRequest('{}', { 'content-length': String(2_000_000) }),
+      ctx.deps,
+    )
+    expect(declared.status).toBe(413)
+
+    // Sem Content-Length (chunked) e sem token: conta os bytes do stream e para.
+    let pulled = 0
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled += 1
+        c.enqueue(new Uint8Array(256 * 1024))
+      },
+    })
+    const chunked = await handleWebhookRequest(webhookRequest(stream), ctx.deps)
+    expect(chunked.status).toBe(413)
+    expect(pulled).toBeLessThan(10)
+    expect(await storedEvents()).toBe(before)
+    expect(ctx.queue).toEqual([])
+  })
+
+  it('entrega válida pela rota continua dando 200 e enfileirando', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const [pay] = ctx.provider.simulatePayment(c.charge.providerPaymentId)
+    const d = ctx.provider.delivery(pay!)
+    const res = await handleWebhookRequest(webhookRequest(d.rawBody, d.headers), ctx.deps)
+    expect(res.status).toBe(200)
+    expect(ctx.queue).toHaveLength(1)
+  })
+})
+
+describe('L2: erro inesperado na rota e inundação de 401', () => {
+  it('exceção inesperada vira 500 com log webhook_receive_failed, sem escapar da rota', async () => {
+    const ctx = setup()
+    ctx.provider.parseWebhook = async () => {
+      throw new Error('bug no adaptador')
+    }
+    const d = ctx.provider.delivery({ id: 'x', event: 'x', dateCreated: '' })
+    const { result, lines } = await captureLogs(() =>
+      handleWebhookRequest(webhookRequest(d.rawBody, d.headers), ctx.deps),
+    )
+    expect(result.status).toBe(500)
+    expect(await result.json()).toEqual({ ok: false, error: 'internal' })
+    const failed = lines.find((l) => l.fields.alertCode === 'webhook_receive_failed')
+    expect(failed?.level).toBe('error')
+    expect(ctx.queue).toEqual([])
+  })
+
+  it('50 requisições com token errado: 401 em todas, um único alerta por janela e nenhum log com alert:true', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const [event] = ctx.provider.simulatePayment(c.charge.providerPaymentId)
+    const d = ctx.provider.delivery(event!, 'token-errado')
+    const before = await storedEvents()
+    const { lines } = await captureLogs(async () => {
+      for (let i = 0; i < 50; i++) {
+        expect((await handleWebhookRequest(webhookRequest(d.rawBody, d.headers), ctx.deps)).status).toBe(401)
+      }
+    })
+    expect(ctx.alerts.filter((a) => a.code === 'webhook_auth_failed')).toHaveLength(1)
+    expect(lines.some((l) => l.fields.alert === true)).toBe(false)
+    expect(lines.filter((l) => l.fields.alertCode === 'webhook_auth_failed')).toHaveLength(50)
+    expect(await storedEvents()).toBe(before)
+
+    // Passada a janela, o próximo 401 alerta de novo e diz quantos foram silenciados.
+    ctx.clock.now += 61_000
+    await handleWebhookRequest(webhookRequest(d.rawBody, d.headers), ctx.deps)
+    const alerts = ctx.alerts.filter((a) => a.code === 'webhook_auth_failed')
+    expect(alerts).toHaveLength(2)
+    expect(alerts[1]!.context).toMatchObject({ suppressedSinceLastAlert: 49 })
+  })
+})
+
+describe('L4: conferências na confirmação', () => {
+  it('cobrança de outro pedido (externalReference) falha fechado: nada lançado, evento em retry com alerta', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const [pay] = ctx.provider.simulatePayment(c.charge.providerPaymentId)
+    ctx.provider.tamper(c.charge.providerPaymentId, { orderId: randomUUID() })
+    await deliver(ctx, pay!)
+    const id = eventIdOf(ctx)
+    expect(await drain(ctx)).toHaveLength(1)
+    expect(ctx.alerts.some((a) => a.code === 'charge_mismatch' && a.severity === 'critical')).toBe(true)
+    expect(ctx.orders.confirmed).toEqual([])
+    expect(await ledgerTxCount(paymentConfirmedKey('fake', c.charge.providerPaymentId))).toBe(0)
+    expect((await eventStatus(id)).status).toBe('retrying')
+  })
+
+  it('parte do dev maior que o líquido real: nada é lançado nem confirmado; corrigido no gateway, o evento conclui', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const pid = c.charge.providerPaymentId
+    const realNet = c.charge.netCents!
+    const [pay] = ctx.provider.simulatePayment(pid)
+    ctx.provider.tamper(pid, { netCents: 8_000n }) // líquido menor que os 8.500 do dev
+    await deliver(ctx, pay!)
+    const id = eventIdOf(ctx)
+    expect(await drain(ctx)).toHaveLength(1)
+    const alert = ctx.alerts.find((a) => a.code === 'split_exceeds_net' && a.severity === 'critical')
+    expect(alert?.context).toMatchObject({ orderId: c.orderId })
+    expect(ctx.orders.confirmed).toEqual([])
+    expect(await ledgerTxCount(paymentConfirmedKey('fake', pid))).toBe(0)
+    expect((await paymentRow(pid)).confirmed_at).toBeNull()
+    expect((await eventStatus(id)).status).toBe('retrying')
+
+    // Uma pessoa ajusta o split no gateway e o evento é reprocessado.
+    ctx.provider.tamper(pid, { netCents: realNet })
+    expect(await processWebhookEvent(id, ctx.deps)).toBe('processed')
+    expect(await ledgerTxCount(paymentConfirmedKey('fake', pid))).toBe(1)
+    expect(ctx.orders.confirmed).toEqual([c.orderId])
+  })
+
+  it('a conciliação aponta cobrança de outro pedido como order_mismatch', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    ctx.provider.tamper(c.charge.providerPaymentId, { orderId: randomUUID() })
+    const report = await asService((db) => reconcilePayments(db, ctx.provider, ctx.deps.alert, { now: future() }))
+    expect(mine(ctx, report.divergences).map((d) => d.kind)).toContain('order_mismatch')
+  })
+})
+
+describe('L6: timeout no gateway e cobrança parcialmente estornada', () => {
+  it('chamada lenta rejeita com timeout e nada é gravado; repetir a mesma chave com o gateway normal funciona', async () => {
+    const ctx = setup({ createDelayMs: 300 })
+    const slow = withProviderTimeout(ctx.provider, 50)
+    const dev = await createUser({ signupRole: 'dev' })
+    const orderId = randomUUID()
+    const input = {
+      orderId,
+      devId: dev.id,
+      customer,
+      method: 'pix' as const,
+      grossCents: 10_000n,
+      devWalletId: `wallet-${dev.id}`,
+      devAmountCents: 8_500n,
+      idempotencyKey: `charge-${orderId}`,
+    }
+    await expect(asService((db) => createOrderCharge(db, slow, input, ctx.deps.alert))).rejects.toMatchObject({
+      name: 'PaymentProviderError',
+      code: 'timeout',
+    })
+    const counts = await asService((db) =>
+      db.execute<{ p: number; k: number }>(
+        sql`select (select count(*)::int from public.payments where order_id = ${orderId}::uuid) p,
+                   (select count(*)::int from public.idempotency_keys where key = ${input.idempotencyKey}) k`,
+      ),
+    )
+    expect(counts[0]).toEqual({ p: 0, k: 0 })
+    // Repetir com a mesma chave grava a cobrança (a chave segue a mesma para o gateway deduplicar na vida real).
+    const again = await asService((db) => createOrderCharge(db, ctx.provider, input, ctx.deps.alert))
+    expect(again.replayed).toBe(false)
+  })
+
+  it('cobrança parcialmente estornada ainda conta como aberta: nova cobrança do pedido é barrada (serviço e índice)', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const pid = c.charge.providerPaymentId
+    await asService((db) =>
+      db.execute(sql`update public.payments set status = 'partially_refunded' where provider_payment_id = ${pid}`),
+    )
+    await expect(
+      asService((db) =>
+        createOrderCharge(db, ctx.provider, { ...c.input, idempotencyKey: `outra-${randomUUID()}` }, ctx.deps.alert),
+      ),
+    ).rejects.toBeInstanceOf(PaymentProviderError)
+
+    // Mesmo que a checagem da aplicação fosse contornada, o índice único parcial segura.
+    await expect(
+      asService((db) =>
+        db.insert(schema.payments).values({
+          id: randomUUID(),
+          orderId: c.orderId,
+          provider: 'fake',
+          providerPaymentId: `dup-${randomUUID()}`,
+          method: 'pix',
+          status: 'pending',
+          devId: c.dev.id,
+          devWalletId: 'w',
+          grossCents: 100n,
+          devAmountCents: 50n,
+        }),
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('cobrança totalmente estornada deixa de ser aberta: o pedido pode ganhar uma nova', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    await asService((db) =>
+      db.execute(
+        sql`update public.payments set status = 'refunded' where provider_payment_id = ${c.charge.providerPaymentId}`,
+      ),
+    )
+    const second = await asService((db) =>
+      createOrderCharge(db, ctx.provider, { ...c.input, idempotencyKey: `nova-${randomUUID()}` }, ctx.deps.alert),
+    )
+    expect(second.replayed).toBe(false)
+  })
+})
+
+describe('L7: reprocesso exige ator admin dentro da função', () => {
+  /** Leva um evento até `failed` (10 falhas), o único estado reprocessável. */
+  async function failedEvent(ctx: Ctx) {
+    const c = await newCharge(ctx)
+    const [pay] = ctx.provider.simulatePayment(c.charge.providerPaymentId)
+    await deliver(ctx, pay!)
+    const id = eventIdOf(ctx)
+    ctx.queue.length = 0
+    ctx.orders.failWith = new Error('orders indisponível')
+    for (let i = 0; i < MAX_ATTEMPTS; i++) await processWebhookEvent(id, ctx.deps).catch(() => undefined)
+    ctx.orders.failWith = null
+    expect((await eventStatus(id)).status).toBe('failed')
+    return id
+  }
+  const audits = (id: string) =>
+    asService(
+      async (db) =>
+        (
+          await db.execute<{ n: number }>(
+            sql`select count(*)::int n from public.audit_log where action = 'webhook.reprocess' and entity_id = ${id}`,
+          )
+        )[0]!.n,
+    )
+
+  it.each([
+    ['dev', () => createUser({ signupRole: 'dev' })],
+    ['cliente', () => createUser({})],
+    ['usuário inexistente', async () => ({ id: randomUUID() })],
+  ])('ator %s é recusado (forbidden): nada gravado, nada enfileirado', async (_name, mkActor) => {
+    const ctx = setup()
+    const id = await failedEvent(ctx)
+    const actor = await mkActor()
+    await expect(reprocessWebhook(id, actor.id, ctx.deps)).rejects.toMatchObject({ code: 'forbidden' })
+    const status = await eventStatus(id)
+    expect(status.status).toBe('failed')
+    expect(status.attempts).toBe(MAX_ATTEMPTS)
+    expect(await audits(id)).toBe(0)
+    expect(ctx.queue).toEqual([])
+  })
+
+  it('admin reprocessa e fica no audit_log', async () => {
+    const ctx = setup()
+    const id = await failedEvent(ctx)
+    const admin = await createUser({ appRole: 'admin' })
+    expect(await reprocessWebhook(id, admin.id, ctx.deps)).toBe('requeued')
+    expect(await audits(id)).toBe(1)
+    expect(ctx.queue).toEqual([id])
+  })
+})
+
+describe('L8: idempotency_keys.id é UUID v7 gerado na aplicação', () => {
+  it('a chave gravada pela criação de cobrança tem id v7 e o banco não gera id sozinho', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const rows = await asService((db) =>
+      db.execute<{ id: string }>(sql`select id from public.idempotency_keys where key = ${c.input.idempotencyKey}`),
+    )
+    expect(rows).toHaveLength(1)
+    expect(isUuidV7(rows[0]!.id)).toBe(true)
+    await expect(
+      asService((db) =>
+        db.execute(
+          sql`insert into public.idempotency_keys (scope, key, request_hash, result_ref) values ('s', ${randomUUID()}, 'h', 'r')`,
+        ),
+      ),
+    ).rejects.toThrow()
   })
 })

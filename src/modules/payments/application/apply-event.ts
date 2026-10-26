@@ -40,6 +40,7 @@ export async function applyPaymentEvent(db: Db, ctx: ApplyEventContext): Promise
 
   const plan = planPaymentSync(
     {
+      orderId: stored.orderId,
       status: stored.status as Charge['status'],
       splitStatus: stored.splitStatus as Charge['splitStatus'],
       grossCents: stored.grossCents,
@@ -74,6 +75,18 @@ export async function applyPaymentEvent(db: Db, ctx: ApplyEventContext): Promise
       context: { orderId: stored.orderId, providerPaymentId: pid, storedStatus: stored.status, gatewayStatus: charge.status },
     })
     return 'applied'
+  }
+
+  if (plan.splitExceedsNet) {
+    // A parte do dev não cabe no líquido real: o Asaas bloquearia o split (SPEC §8, item 4). Falha fechado: nada é
+    // lançado nem confirmado; uma pessoa ajusta no gateway e reprocessa o evento.
+    alert({
+      severity: 'critical',
+      code: 'split_exceeds_net',
+      message: 'Cobrança paga com parte do dev maior que o líquido: ajustar o split no gateway e reprocessar',
+      context: { orderId: stored.orderId, providerPaymentId: pid },
+    })
+    throw new PaymentProviderError('conflict', `Parte do dev maior que o líquido da cobrança ${pid}`)
   }
 
   if (plan.firstPaid) {

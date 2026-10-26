@@ -1,11 +1,13 @@
 import 'server-only'
 import { inngest } from '@/jobs/client'
+import { isAdminUser } from '@/lib/auth/admin'
 import { withService } from '@/lib/db'
 import type { RecipientGateway } from '@/modules/accounts/domain/recipient-gateway'
 import { FakeRecipientGateway } from '@/modules/accounts/infra/fake-recipient-gateway'
 import { logPaymentAlert } from '@/modules/payments'
 import type { OrderPaymentEffects, PaymentProvider } from '@/modules/payments'
 import { FakePaymentProvider } from '@/modules/payments/infra/fake-payment-provider'
+import { withProviderTimeout } from '@/modules/payments/infra/timeout-payment-provider'
 import { PROCESS_EVENT_NAME } from '@/modules/webhooks'
 import type { WebhookDeps } from '@/modules/webhooks'
 
@@ -30,9 +32,9 @@ export function getPaymentProvider(): PaymentProvider {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('PaymentProvider de produção indisponível: adaptador Asaas pendente (ADR-017)')
   }
-  globalForGateway.__paymentProvider ??= new FakePaymentProvider(getRecipientGateway(), {
-    webhookToken: process.env.ASAAS_WEBHOOK_TOKEN || undefined,
-  })
+  globalForGateway.__paymentProvider ??= withProviderTimeout(
+    new FakePaymentProvider(getRecipientGateway(), { webhookToken: process.env.ASAAS_WEBHOOK_TOKEN || undefined }),
+  )
   return globalForGateway.__paymentProvider
 }
 
@@ -64,5 +66,6 @@ export function getWebhookDeps(): WebhookDeps {
       await inngest.send(ids.map((webhookEventId) => ({ name: PROCESS_EVENT_NAME, data: { webhookEventId } })))
     },
     run: (fn) => withService(fn),
+    isAdmin: isAdminUser,
   }
 }

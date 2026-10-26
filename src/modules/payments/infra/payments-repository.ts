@@ -1,6 +1,7 @@
 import 'server-only'
 import { and, eq, gte, lt, lte, or, sql } from 'drizzle-orm'
 import { schema, type Db } from '@/lib/db'
+import { newId } from '@/lib/ids'
 import type { ChargeStatus, SplitStatus, WebhookProvider } from '../domain/provider'
 
 export type PaymentRow = typeof schema.payments.$inferSelect
@@ -36,7 +37,7 @@ export async function findOpenPaymentForOrder(db: Db, orderId: string): Promise<
     .where(
       and(
         eq(schema.payments.orderId, orderId),
-        sql`${schema.payments.status} in ('pending', 'confirmed', 'received')`,
+        sql`${schema.payments.status} in ('pending', 'confirmed', 'received', 'partially_refunded')`,
       ),
     )
   return row
@@ -107,7 +108,7 @@ export async function insertIdempotencyKey(
   db: Db,
   row: { scope: string; key: string; requestHash: string; resultRef: string },
 ): Promise<void> {
-  await db.insert(schema.idempotencyKeys).values(row)
+  await db.insert(schema.idempotencyKeys).values({ id: newId(), ...row })
 }
 
 export async function insertReconciliationRun(

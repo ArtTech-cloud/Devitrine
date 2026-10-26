@@ -346,8 +346,8 @@ Todo webhook segue o mesmo caminho: autenticar, gravar na caixa de entrada, resp
 
 **Endpoints:** `POST /api/webhooks/asaas`, `POST /api/webhooks/asaas-withdrawal` e, na Fase 6, `POST /api/webhooks/stripe`. São Route Handlers em runtime Node, lendo o corpo bruto (nenhum parser pode alterá-lo antes da verificação).
 
-1. Ler corpo bruto e headers.
-2. Autenticar conforme o provedor (tabela abaixo). Falhou: 401, registrar a tentativa sem o payload e alertar se repetir.
+1. Ler corpo bruto e headers, com teto de 1 MB aplicado por `Content-Length` e pela contagem de bytes do stream **antes** de autenticar (acima disso, 413 sem gravar nada).
+2. Autenticar conforme o provedor (tabela abaixo). Falhou: 401, registrar a tentativa sem o payload; o log de cada 401 não leva `alert: true` (quem conhece a URL poderia inundar o canal de alertas), e o alerta sai no máximo uma vez por janela de 5 minutos, com a contagem dos silenciados. Exceção inesperada na rota: 500 com log `webhook_receive_failed` (o provedor reenvia).
 3. Inserir em `webhook_events` com `(provider, event_id)` único. Se já existir, responder 200 sem reprocessar.
 4. Enfileirar o job `webhooks/process` com o id do registro. Se o envio falhar, o registro fica em `received` e a varredura de 5 minutos o reenfileira.
 5. Responder 200, só depois de gravar e enfileirar: na Vercel, o que roda depois da resposta pode ser interrompido.
@@ -381,7 +381,7 @@ Todo webhook segue o mesmo caminho: autenticar, gravar na caixa de entrada, resp
 
 **Divergência de valores falha fechado:** se o bruto, a parte do dev ou a carteira que o gateway devolve diferem do gravado em `payments`, o evento não lança no ledger, não confirma o pedido e não muda nada; fica em retry com alerta crítico (`charge_mismatch`) até uma pessoa resolver. O mesmo vale na criação: cobrança devolvida com valores diferentes do pedido não é gravada e gera o alerta `charge_created_mismatch`.
 
-**Pago depois de cancelado (`paid_after_cancel`):** se a cobrança está `overdue` ou `deleted` em `payments` (o pedido já foi cancelado) e o gateway a mostra paga, o sistema gera na hora um alerta crítico `paid_after_cancel` e **não** confirma o pedido, não lança no ledger e não altera o status gravado; a conciliação mantém a divergência aberta. **Proposta de política de devolução (pendente de confirmação do Arthur, ADR-019 item 4):** o admin devolve o valor integral ao cliente pelo `refund` do gateway (com chave de idempotência e auditoria); o pedido só é reaberto se o dev confirmar que ainda aceita e o pagamento estiver em custódia, e nunca automaticamente.
+**Pago depois de cancelado (`paid_after_cancel`):** se a cobrança está `overdue` ou `deleted` em `payments` (o pedido já foi cancelado) e o gateway a mostra paga, o sistema gera na hora um alerta crítico `paid_after_cancel` e **não** confirma o pedido, não lança no ledger e não altera o status gravado; a conciliação mantém a divergência aberta. **Política de devolução (aprovada pelo Arthur em 2026-10-26, ADR-019 item 4):** o admin devolve o valor integral ao cliente pelo `refund` do gateway (com chave de idempotência e auditoria); o pedido só é reaberto se o dev confirmar que ainda aceita e o pagamento estiver em custódia, e nunca automaticamente. A ação de devolução do admin ainda não está implementada (Fase 4); até lá o admin devolve à mão pelo painel do gateway.
 
 **Notas de implementação (ADR-020):** como `webhook_events` é append-only, o `status` (`received`, `processed`, `ignored`, `retrying`, `failed`), as tentativas e o último erro vêm de `webhook_event_runs` e da view `webhook_event_status`. A varredura de 5 minutos reenfileira `received` há mais de 120 s e `retrying` sem execução há mais de 1 h; uma falha tardia de um worker nunca reabre um evento já concluído. Estorno, chargeback e split só atualizam o status e alertam até a Fase 3, que traz os lançamentos. Enquanto o módulo `orders` não existe, o efeito no pedido falha fechado e o evento é repetido.
 
@@ -395,6 +395,10 @@ Todo webhook segue o mesmo caminho: autenticar, gravar na caixa de entrada, resp
 - Evento gravado e não enfileirado é reprocessado pela varredura.
 - Dois pedidos de saque seguidos nunca somam mais que o saldo disponível.
 - Duas criações de cobrança do mesmo pedido, com chaves diferentes e em paralelo, chamam o gateway uma única vez.
+- Cobrança `partially_refunded` ainda conta como aberta: o pedido não ganha segunda cobrança (serviço e índice único).
+- Corpo acima de 1 MB (por `Content-Length` ou por stream) dá 413 sem gravar; 50 requisições com token errado geram 401 em todas e um único alerta por janela.
+- `reprocessWebhook` recusa ator que não é admin, dentro da função, sem gravar nem enfileirar.
+- Cobrança de outro pedido, ou parte do dev acima do líquido real, na confirmação: nenhum lançamento nem confirmação, evento em retry com alerta crítico.
 - Cobrança paga depois de vencida gera `paid_after_cancel`, sem lançamento nem confirmação do pedido.
 - Bruto, parte do dev ou carteira divergentes: nenhum lançamento, nenhuma confirmação, evento em retry com alerta.
 - Corpo de webhook fora do formato: 400 e nada gravado.
@@ -444,7 +448,7 @@ A plataforma não toca em dados de cartão, guarda o mínimo de dados pessoais e
 - Base legal registrada por tipo de dado; coleta mínima (CPF ou CNPJ só quando a cobrança ou a nota fiscal exigirem).
 - Termos e política de privacidade versionados, com aceite registrado (versão, data, IP).
 - Titular pode exportar e excluir seus dados, respeitando o que a lei manda guardar (registros fiscais e financeiros).
-- **Payload bruto de webhook (`webhook_events.payload`):** guarda o corpo recebido do gateway, que pode conter dados pessoais do pagador. **Proposta, pendente de confirmação do Arthur com o advogado e o DPO (ADR-019 item 5):** base legal de execução de contrato e prevenção a fraude e auditoria (LGPD art. 7º, V e IX); manter o corpo completo por 12 meses e depois reduzi-lo a metadados (tipo, ids e datas); registros financeiros (`payments`, ledger) seguem o prazo fiscal. Como a tabela é append-only, o expurgo exige uma função auditada própria, ainda não implementada.
+- **Payload bruto de webhook (`webhook_events.payload`):** guarda o corpo recebido do gateway, que pode conter dados pessoais do pagador. **Política aprovada pelo Arthur em 2026-10-26 (ADR-019 item 5), ainda sujeita à confirmação do advogado ou do DPO:** base legal de execução de contrato e prevenção a fraude e auditoria (LGPD art. 7º, V e IX); manter o corpo completo por 12 meses e depois reduzi-lo a metadados (tipo, ids e datas); registros financeiros (`payments`, ledger) seguem o prazo fiscal. Como a tabela é append-only, o expurgo exige uma função auditada própria, **ainda não implementada**; junto com a confirmação jurídica, é pendência aberta (não bloqueia a etapa 2, mas precisa fechar antes de dinheiro real).
 - Encarregado (DPO) nomeado, com canal de contato público.
 
 **Curadoria e KYC de devs:** KYC feito pelo gateway na subconta, mais portfólio e teste prático. Dev suspenso não recebe pedidos novos e tem saques bloqueados enquanto houver disputa aberta.
@@ -568,8 +572,8 @@ Seis decisões travam fases específicas; nenhuma impede começar a Fase 0 hoje.
 | Regime tributário e tratamento da receita como intermediação | Simples Nacional ou Lucro Presumido | Primeiro pedido pago | Contador |
 | Taxas e prazos finais | Valores das seções 2 e 7 como ponto de partida | Piloto | Fundadores, com dados dos primeiros pedidos |
 | Política de reembolso e arrependimento | A definir | Fase 4 | Advogado |
-| Devolução de pagamento recebido depois do cancelamento do pedido (`paid_after_cancel`; proposta na seção 9, [ADR-019](decisions/019-pendencias-de-negocio-do-gateway.md) item 4) | Devolver integral por ação do admin; reabrir o pedido com aceite do dev | Antes de dinheiro real | Arthur, com o advogado |
-| Base legal e prazo de retenção do payload bruto de webhook (seção 10, ADR-019 item 5) | 12 meses com corpo completo, depois só metadados | Antes de dinheiro real | Arthur, com o advogado e o DPO |
+| Devolução de pagamento recebido depois do cancelamento do pedido (`paid_after_cancel`; seção 9, [ADR-019](decisions/019-pendencias-de-negocio-do-gateway.md) item 4) | **Aprovada pelo Arthur em 2026-10-26:** devolver integral por ação do admin; reabrir o pedido só com aceite do dev e valor em custódia | Antes de dinheiro real: implementar a ação do admin e o texto dos termos (advogado) | Arthur, com o advogado |
+| Base legal e prazo de retenção do payload bruto de webhook (seção 10, ADR-019 item 5) | **Aprovada pelo Arthur em 2026-10-26:** 12 meses com corpo completo, depois só metadados | Antes de dinheiro real: confirmação do advogado ou do DPO e função de expurgo auditada (ainda não existem) | Arthur, com o advogado e o DPO |
 | Jurisdição para clientes no exterior | Tudo no Brasil; entidade nos EUA, na Estônia ou nos Emirados com Stripe | Fase 6 | Fundadores e tributarista |
 
 Sobre a última linha: para sócios que moram no Brasil, empresa em jurisdição da [lista da Receita](https://www.normaslegais.com.br/legislacao/inrfb1037_2010.htm) tem o lucro tributado todo ano a 15% pela [Lei 14.754/2023](https://www.normaslegais.com.br/legislacao/lei-14754-2023.htm). O mesmo vale para a LLC americana de sócio não residente, que está na lista de regimes fiscais privilegiados. A Stripe [não atende](https://support.stripe.com/questions/stripe-availability-for-outlying-territories-of-supported-countries) territórios britânicos como as Ilhas Virgens Britânicas.

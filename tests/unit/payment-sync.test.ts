@@ -30,6 +30,7 @@ const charge = (over: Partial<Charge> = {}): Charge => ({
 })
 
 interface Stored {
+  orderId: string
   status: ChargeStatus
   splitStatus: SplitStatus
   grossCents: bigint
@@ -41,6 +42,7 @@ interface Stored {
 }
 
 const fresh = (): Stored => ({
+  orderId: 'order-1',
   status: 'pending',
   splitStatus: 'pending',
   grossCents: 10_000n,
@@ -264,5 +266,32 @@ describe('política da caixa de entrada', () => {
     const source = readFileSync('src/jobs/webhooks.ts', 'utf8')
     const retries = Number(/retries:\s*(\d+)/.exec(source)?.[1])
     expect(retries).toBe(MAX_ATTEMPTS - 1)
+  })
+})
+
+describe('planPaymentSync: conferências da confirmação (L4)', () => {
+  const paid = (over: Partial<Charge> = {}) => charge({ status: 'received', paidAt: new Date(), ...over })
+
+  it('cobrança de outro pedido (externalReference) falha fechado', () => {
+    expect(planPaymentSync(fresh(), paid({ orderId: 'order-OUTRO' })).mismatches).toEqual(['order_id'])
+    expect(planPaymentSync(fresh(), paid()).mismatches).toEqual([])
+  })
+
+  it('carteira diferente da gravada falha fechado', () => {
+    expect(planPaymentSync(fresh(), paid({ devWalletId: 'wallet-outra' })).mismatches).toEqual(['dev_wallet_id'])
+  })
+
+  it('parte do dev maior que o líquido real na primeira confirmação sinaliza splitExceedsNet', () => {
+    const stored = { ...fresh(), devAmountCents: 9_950n }
+    expect(planPaymentSync(stored, paid({ devAmountCents: 9_950n, netCents: 9_901n })).splitExceedsNet).toBe(true)
+    // D = líquido cabe (D ≤ net).
+    expect(planPaymentSync(stored, paid({ devAmountCents: 9_950n, netCents: 9_950n })).splitExceedsNet).toBe(false)
+    // Ainda pendente: é estimativa, não há confirmação para barrar.
+    expect(planPaymentSync(stored, charge({ devAmountCents: 9_950n, netCents: 9_901n })).splitExceedsNet).toBe(false)
+  })
+
+  it('depois de confirmada, o líquido fica o gravado e splitExceedsNet não reaparece', () => {
+    const confirmed = { ...fresh(), status: 'received' as const, confirmedAt: new Date() }
+    expect(planPaymentSync(confirmed, paid({ netCents: 1n })).splitExceedsNet).toBe(false)
   })
 })

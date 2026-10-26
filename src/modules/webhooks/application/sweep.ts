@@ -1,4 +1,5 @@
 import 'server-only'
+import { AppError } from '@/lib/errors'
 import { withContext } from '@/lib/logger'
 import { SWEEP_BATCH, SWEEP_GRACE_SECONDS, SWEEP_RETRYING_GRACE_SECONDS } from '../domain/policy'
 import { advisoryLock, findStuckEvents, insertRun, readStatus, writeAudit } from '../infra/webhook-repository'
@@ -34,6 +35,7 @@ export type ReprocessResult = 'requeued' | 'not_found' | 'not_failed'
 /**
  * Botão "reprocessar" do admin (SPEC §9, passo 7), para evento em `failed` ou `retrying`. Grava `requeued`
  * (zera a contagem de tentativas, sem apagar o histórico), registra no audit_log e reenfileira.
+ * O ator precisa ser admin: conferido aqui dentro, antes de ler ou gravar qualquer coisa (erro `forbidden`).
  */
 export async function reprocessWebhook(
   webhookEventId: string,
@@ -41,6 +43,9 @@ export async function reprocessWebhook(
   deps: WebhookDeps,
 ): Promise<ReprocessResult> {
   const result = await deps.run(async (db) => {
+    if (!(await deps.isAdmin(db, actorId))) {
+      throw new AppError('forbidden', 'Só admin pode reprocessar webhooks')
+    }
     await advisoryLock(db, `webhook_event:${webhookEventId}`)
     const status = await readStatus(db, webhookEventId)
     if (!status) return 'not_found' as const

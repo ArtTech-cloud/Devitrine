@@ -4,6 +4,7 @@ export type PaymentErrorCode =
   | 'conflict'
   | 'idempotency_mismatch'
   | 'not_implemented'
+  | 'timeout'
 
 /** Erro de uma chamada ao gateway (ou ao fake). `idempotency_mismatch`: mesma chave, parâmetros diferentes. */
 export class PaymentProviderError extends Error {

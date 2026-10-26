@@ -1,3 +1,4 @@
+import { splitFitsNet } from './charge-rules'
 import type { Charge, ChargeStatus, SplitStatus } from './provider'
 
 // Regras puras de como a cobrança gravada acompanha a do gateway (SPEC §9, passo 6). O job sempre busca o
@@ -44,6 +45,7 @@ export function canAdvanceSplit(from: SplitStatus, to: SplitStatus): boolean {
 }
 
 export interface StoredPayment {
+  orderId: string
   status: ChargeStatus
   splitStatus: SplitStatus
   grossCents: bigint
@@ -72,6 +74,11 @@ export interface PaymentSyncPlan {
    * lança no ledger, não confirma o pedido e não muda nada; fica em retry com alerta (SPEC §9).
    */
   mismatches: string[]
+  /**
+   * Na primeira vez paga, a parte do dev não cabe no líquido real (SPEC §8, item 4): o gateway bloquearia o split.
+   * Falha fechado, como a divergência: nada é lançado nem confirmado até uma pessoa resolver.
+   */
+  splitExceedsNet: boolean
   changed: boolean
 }
 
@@ -85,6 +92,8 @@ export function planPaymentSync(stored: StoredPayment, charge: Charge): PaymentS
   const paidAfterCancel =
     (stored.status === 'overdue' || stored.status === 'deleted') && isPaidStatus(charge.status)
   const mismatches: string[] = []
+  // `charge.orderId` é o externalReference da cobrança: ela precisa ser deste pedido.
+  if (charge.orderId !== stored.orderId) mismatches.push('order_id')
   if (charge.grossCents !== stored.grossCents) mismatches.push('gross_cents')
   if (charge.devAmountCents !== stored.devAmountCents) mismatches.push('dev_amount_cents')
   if (charge.devWalletId !== stored.devWalletId) mismatches.push('dev_wallet_id')
@@ -96,6 +105,7 @@ export function planPaymentSync(stored: StoredPayment, charge: Charge): PaymentS
     cancelled,
     paidAfterCancel,
     mismatches,
+    splitExceedsNet: firstPaid && netCents !== null && !splitFitsNet(stored.devAmountCents, netCents),
     changed: status !== stored.status || splitStatus !== stored.splitStatus || netCents !== stored.netCents,
   }
 }

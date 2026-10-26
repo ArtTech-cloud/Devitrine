@@ -30,6 +30,7 @@ export type DivergenceKind =
   | 'unreadable_at_provider'
   | 'split_mismatch'
   | 'amount_mismatch'
+  | 'order_mismatch'
   | 'net_mismatch'
   | 'ledger_missing'
   | 'ledger_mismatch'
@@ -111,6 +112,9 @@ export async function reconcilePayments(
     if (!row) {
       if (!inFlight) add('missing_payment_row', 'Cobrança existe no gateway e não em payments')
       continue
+    }
+    if (charge.orderId !== row.orderId) {
+      add('order_mismatch', `pedido: gateway ${charge.orderId}, payments ${row.orderId}`)
     }
     if (charge.grossCents !== row.grossCents) {
       add('amount_mismatch', `bruto: gateway ${charge.grossCents}, payments ${row.grossCents}`)

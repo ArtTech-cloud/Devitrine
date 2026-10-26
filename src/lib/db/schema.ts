@@ -175,7 +175,7 @@ export const payments = pgTable('payments', {
 })
 
 export const idempotencyKeys = pgTable('idempotency_keys', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id: uuid('id').primaryKey(),
   scope: text('scope').notNull(),
   key: text('key').notNull(),
   requestHash: text('request_hash').notNull(),

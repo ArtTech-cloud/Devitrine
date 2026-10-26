@@ -303,7 +303,10 @@ export class FakePaymentProvider implements PaymentProvider {
   }
 
   /** Gateway "muda" valores da cobrança (só para testar divergência; o Asaas real pode alterar valor de cobrança). */
-  tamper(providerPaymentId: string, patch: { grossCents?: bigint; devAmountCents?: bigint; devWalletId?: string }) {
+  tamper(
+    providerPaymentId: string,
+    patch: { grossCents?: bigint; devAmountCents?: bigint; devWalletId?: string; orderId?: string; netCents?: bigint },
+  ) {
     Object.assign(this.mustCharge(providerPaymentId), patch)
   }
 
