@@ -64,11 +64,19 @@ export async function insertRun(
   await db.insert(schema.webhookEventRuns).values({ webhookEventId: id, outcome, error: error ?? null })
 }
 
-/** Eventos parados em `received` há mais que `graceSeconds` (a varredura de 5 minutos reenfileira). */
-export async function findStuckReceived(db: Db, graceSeconds: number, limit: number): Promise<string[]> {
+/**
+ * Eventos sem job vivo: parados em `received` há mais que `receivedGraceSeconds`, ou em `retrying` sem execução
+ * nova há mais que `retryingGraceSeconds` (a varredura de 5 minutos reenfileira os dois).
+ */
+export async function findStuckEvents(
+  db: Db,
+  grace: { receivedSeconds: number; retryingSeconds: number },
+  limit: number,
+): Promise<string[]> {
   const rows = await db.execute<{ id: string }>(
     sql`select id from public.webhook_event_status
-      where status = 'received' and coalesce(last_run_at, received_at) < now() - make_interval(secs => ${graceSeconds})
+      where (status = 'received' and coalesce(last_run_at, received_at) < now() - make_interval(secs => ${grace.receivedSeconds}))
+         or (status = 'retrying' and last_run_at < now() - make_interval(secs => ${grace.retryingSeconds}))
       order by received_at limit ${limit}`,
   )
   return rows.map((r) => r.id)

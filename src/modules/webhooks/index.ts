@@ -11,6 +11,7 @@ export {
   MAX_BODY_BYTES,
   PROCESS_EVENT_NAME,
   SWEEP_GRACE_SECONDS,
+  SWEEP_RETRYING_GRACE_SECONDS,
   WebhookDeadError,
 } from './domain/policy'
 export type { WebhookStatus } from './domain/policy'

@@ -4,11 +4,13 @@ import { newId } from '@/lib/ids'
 import { checkLedgerTx, paymentConfirmed } from '@/modules/ledger'
 import { isPaidStatus } from '../domain/payment-sync'
 import type { AlertSink } from '../domain/ports'
+import { PaymentProviderError } from '../domain/errors'
 import type { Charge, PaymentProvider } from '../domain/provider'
 import {
   findPaymentByProviderId,
   insertReconciliationRun,
   listPaymentsCreatedBetween,
+  listPaymentsToRecheck,
   type PaymentRow,
 } from '../infra/payments-repository'
 import { paymentConfirmedKey } from './apply-event'
@@ -17,11 +19,15 @@ import { paymentConfirmedKey } from './apply-event'
 export const RECONCILIATION_WINDOW_HOURS = 72
 /** Eventos ainda em voo não são divergência: cobranças mexidas há menos que isto só contam se faltarem dados. */
 export const RECONCILIATION_GRACE_MINUTES = 15
+/** Máximo de cobranças antigas (criadas antes da janela) reconferidas uma a uma por execução. */
+export const RECONCILIATION_RECHECK_LIMIT = 500
 
 export type DivergenceKind =
   | 'missing_payment_row'
   | 'missing_at_provider'
   | 'status_mismatch'
+  | 'paid_after_cancel'
+  | 'unreadable_at_provider'
   | 'split_mismatch'
   | 'amount_mismatch'
   | 'net_mismatch'
@@ -61,8 +67,33 @@ export async function reconcilePayments(
   const now = opts.now ?? new Date()
   const windowFrom = new Date(now.getTime() - RECONCILIATION_WINDOW_HOURS * 3_600_000)
   const grace = new Date(now.getTime() - RECONCILIATION_GRACE_MINUTES * 60_000)
-  const charges = await provider.listCharges({ from: windowFrom, to: now })
+  const listed = await provider.listCharges({ from: windowFrom, to: now })
   const divergences: Divergence[] = []
+  // A listagem é por data de criação. Cobrança criada antes da janela e ainda pendente (ou mexida na janela) é
+  // lida uma a uma, senão um Pix pago no 5º dia nunca seria conferido (ADR-020, item 13).
+  const charges = [...listed]
+  for (const row of await listPaymentsToRecheck(db, windowFrom, RECONCILIATION_RECHECK_LIMIT)) {
+    if (row.provider !== provider.name) continue
+    try {
+      charges.push(await provider.getCharge(row.providerPaymentId))
+    } catch (error) {
+      if (error instanceof PaymentProviderError && error.code === 'not_found') {
+        divergences.push({
+          kind: 'missing_at_provider',
+          providerPaymentId: row.providerPaymentId,
+          orderId: row.orderId,
+          detail: 'Cobrança existe em payments e não no gateway',
+        })
+      } else {
+        divergences.push({
+          kind: 'unreadable_at_provider',
+          providerPaymentId: row.providerPaymentId,
+          orderId: row.orderId,
+          detail: 'Não foi possível ler a cobrança no gateway para conferir',
+        })
+      }
+    }
+  }
   const seen = new Set<string>()
 
   for (const charge of charges) {
@@ -88,7 +119,11 @@ export async function reconcilePayments(
       add('amount_mismatch', `split do dev: gateway ${charge.devAmountCents}, payments ${row.devAmountCents}`)
     }
     if (!inFlight) {
-      if (charge.status !== row.status) add('status_mismatch', `gateway ${charge.status}, payments ${row.status}`)
+      if ((row.status === 'overdue' || row.status === 'deleted') && isPaidStatus(charge.status)) {
+        add('paid_after_cancel', `pago no gateway (${charge.status}) depois de ${row.status}: devolver ao cliente`)
+      } else if (charge.status !== row.status) {
+        add('status_mismatch', `gateway ${charge.status}, payments ${row.status}`)
+      }
       if (charge.splitStatus !== row.splitStatus) {
         add('split_mismatch', `gateway ${charge.splitStatus}, payments ${row.splitStatus}`)
       }
@@ -143,6 +178,8 @@ async function checkLedger(
   if (REVERSALS.has(charge.status)) {
     add('unbooked_reversal', `${charge.status}: o lançamento de estorno ou chargeback é da Fase 3`)
   }
+  // Pago depois de vencer ou ser apagada: já virou `paid_after_cancel`; não repetir como `ledger_missing`.
+  if (row.status === 'overdue' || row.status === 'deleted') return
   if (!row.confirmedAt || row.netCents === null) {
     if (!inFlight) add('ledger_missing', 'Gateway marca pago e payments ainda não confirmou o pagamento')
     return

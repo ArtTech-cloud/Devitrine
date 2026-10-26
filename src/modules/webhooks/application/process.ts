@@ -56,10 +56,17 @@ export async function processWebhookEvent(webhookEventId: string, deps: WebhookD
     const attempts = await deps.run(async (db) => {
       await advisoryLock(db, `webhook_event:${webhookEventId}`)
       const current = await readStatus(db, webhookEventId)
+      // Outro worker pode ter terminado o evento enquanto este falhava: gravar `failed` depois de `processed`
+      // reabriria um evento concluído (o status vem da última execução). Sob a trava, só grava se ainda está aberto.
+      if (current && TERMINAL_STATUSES.has(current.status)) return null
       const next = (current?.attempts ?? 0) + 1
       await insertRun(db, webhookEventId, isLastAttempt(next) ? 'dead' : 'failed', text)
       return next
     })
+    if (attempts === null) {
+      log.info({ webhookEventId, err: error }, 'falha ignorada: o evento já foi concluído por outro worker')
+      return 'skipped'
+    }
     log.warn({ webhookEventId, attempts, err: error }, 'falha ao processar webhook')
     if (isLastAttempt(attempts)) {
       deps.alert({

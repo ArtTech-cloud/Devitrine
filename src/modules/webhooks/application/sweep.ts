@@ -1,15 +1,28 @@
 import 'server-only'
 import { withContext } from '@/lib/logger'
-import { SWEEP_BATCH, SWEEP_GRACE_SECONDS } from '../domain/policy'
-import { advisoryLock, findStuckReceived, insertRun, readStatus, writeAudit } from '../infra/webhook-repository'
+import { SWEEP_BATCH, SWEEP_GRACE_SECONDS, SWEEP_RETRYING_GRACE_SECONDS } from '../domain/policy'
+import { advisoryLock, findStuckEvents, insertRun, readStatus, writeAudit } from '../infra/webhook-repository'
 import type { WebhookDeps } from './deps'
 
 /**
  * Varredura de 5 minutos (SPEC §9, passo 4): reenfileira eventos que ficaram em `received` porque o envio do job
- * falhou. Reenfileirar é seguro: o processamento é idempotente e confere o status antes de agir.
+ * falhou, e os em `retrying` que perderam o job (sem execução há mais de 1 h). Reenfileirar é seguro: o
+ * processamento é idempotente e confere o status antes de agir.
  */
-export async function sweepStuckWebhooks(deps: WebhookDeps): Promise<{ requeued: number }> {
-  const ids = await deps.run((db) => findStuckReceived(db, SWEEP_GRACE_SECONDS, SWEEP_BATCH))
+export async function sweepStuckWebhooks(
+  deps: WebhookDeps,
+  grace: { receivedSeconds?: number; retryingSeconds?: number } = {},
+): Promise<{ requeued: number }> {
+  const ids = await deps.run((db) =>
+    findStuckEvents(
+      db,
+      {
+        receivedSeconds: grace.receivedSeconds ?? SWEEP_GRACE_SECONDS,
+        retryingSeconds: grace.retryingSeconds ?? SWEEP_RETRYING_GRACE_SECONDS,
+      },
+      SWEEP_BATCH,
+    ),
+  )
   if (ids.length === 0) return { requeued: 0 }
   await deps.enqueue(ids)
   withContext({}).info({ requeued: ids.length }, 'varredura reenfileirou webhooks parados')

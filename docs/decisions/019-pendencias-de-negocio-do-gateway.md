@@ -5,7 +5,7 @@
 
 ## Contexto
 
-Três pontos do fluxo de dinheiro dependem de decisões dos fundadores e do contrato real com o Asaas (SPEC §14). Nenhum bloqueia o desenvolvimento: a Fase 2 roda contra o adaptador fake (ADR-017), e o Arthur autorizou seguir para a etapa 2 mantendo as suposições abaixo. Este ADR as reúne num só lugar, no mesmo formato do que já foi feito com o pagador da taxa do escrow na Fase 1 (ADR-012). Ele reforça os registros anteriores; não os substitui.
+Cinco pontos do fluxo de dinheiro dependem de decisões dos fundadores e do contrato real com o Asaas (SPEC §14). Nenhum bloqueia o desenvolvimento: a Fase 2 roda contra o adaptador fake (ADR-017), e o Arthur autorizou seguir para a etapa 2 mantendo as suposições abaixo. Este ADR as reúne num só lugar, no mesmo formato do que já foi feito com o pagador da taxa do escrow na Fase 1 (ADR-012). Ele reforça os registros anteriores; não os substitui.
 
 ## Suposições em vigor
 
@@ -14,12 +14,16 @@ Três pontos do fluxo de dinheiro dependem de decisões dos fundadores e do cont
 | 1 | **Pagador da taxa do escrow:** `isFeePayer = false`, a plataforma arca com a taxa da conta de garantia. | `accounts/application/dev-service.ts` | ADR-012 |
 | 2 | **Taxa do chargeback:** a plataforma arca com o custo da contestação e cobra do dev depois, pela conta `dev_receivable`. | `ledger/domain/postings.ts` (`chargebackAfterRelease`), SPEC §6 | ADR-018 |
 | 3 | **`daysToExpire` da garantia:** valor placeholder lido do setting `escrow_days_to_expire` (60 dias na migração 0001), maior que o ciclo máximo do pedido. O limite real do Asaas não está na documentação. | `accounts/application/dev-service.ts`, `db/migrations/0001_base.sql` | SPEC §8 |
+| 4 | **Pago depois de cancelado (`paid_after_cancel`):** proposta, não decisão: devolver o valor integral ao cliente (`refund` total, com chave de idempotência) por ação de um admin, sem reabrir o pedido sozinho; só reabrir o pedido se o dev confirmar que ainda aceita, e nunca antes de o valor estar em custódia. Hoje o sistema só alerta. | `payments/application/apply-event.ts`, SPEC §9 | Revisão do Vigia (B2) |
+| 5 | **Retenção do payload bruto de webhook (LGPD):** proposta, não decisão: base legal de execução de contrato e prevenção a fraude (LGPD art. 7º, V e IX), 12 meses com o corpo completo e depois só metadados; registros financeiros seguem o prazo fiscal. Falta um mecanismo de expurgo que respeite o append-only. | `webhook_events.payload`, SPEC §10 | Revisão do Vigia (M5) |
 
 ## O que precisa ser decidido, e por quem
 
 1. **Pagador da taxa do escrow (1):** fundadores, com os números do contrato. Se o dev passar a pagar, `isFeePayer` vira `true` e o preço líquido do dev muda; o cálculo de D e P na SPEC §6 precisa de revisão.
 2. **Chargeback (2):** fundadores, com o contrato do Asaas. A suposição é que a plataforma paga a taxa e debita o dev depois. Se o dev tiver saldo insuficiente, `dev_receivable` fica positivo e reduz o saldo gastável (`getDevSpendableCents`), o que pode bloquear saques futuros do dev. Os termos de uso (jurídico, Fase 4) precisam prever essa cobrança posterior.
 3. **`daysToExpire` (3):** confirmar com o Asaas o limite aceito e escolher um valor maior que o ciclo máximo do pedido. Se a garantia expirar antes da conclusão, o webhook de validação de saque continua protegendo o valor (SPEC §8).
+4. **`paid_after_cancel` (4):** Arthur decide a política de devolução (e o advogado, o texto dos termos). Até lá o sistema só alerta e o admin devolve à mão.
+5. **Retenção do payload (5):** Arthur, com o advogado e o DPO, confirma base legal e prazo; depois o time cria o mecanismo de expurgo (função auditada que reduz o `payload` sem violar o append-only dos demais campos).
 
 ## Decisão
 

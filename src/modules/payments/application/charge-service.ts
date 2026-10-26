@@ -31,6 +31,15 @@ export interface OrderCharge {
   replayed: boolean
 }
 
+const chargeMismatches = (input: CreateOrderChargeInput, charge: Charge): string[] => {
+  const wrong: string[] = []
+  if (charge.grossCents !== input.grossCents) wrong.push('gross_cents')
+  if (charge.devAmountCents !== input.devAmountCents) wrong.push('dev_amount_cents')
+  if (charge.devWalletId !== input.devWalletId) wrong.push('dev_wallet_id')
+  if (charge.method !== input.method) wrong.push('method')
+  return wrong
+}
+
 const hashOf = (input: CreateOrderChargeInput) =>
   createHash('sha256')
     .update(
@@ -60,6 +69,9 @@ export async function createOrderCharge(
 ): Promise<OrderCharge> {
   assertChargeInput(input)
   const requestHash = hashOf(input)
+  // Ordem fixa das travas (pedido, depois chave): chaves diferentes para o mesmo pedido não chamam o gateway duas
+  // vezes, e nunca há ciclo entre duas transações.
+  await advisoryLock(db, `${CREATE_CHARGE_SCOPE}:order:${input.orderId}`)
   await advisoryLock(db, `${CREATE_CHARGE_SCOPE}:${input.idempotencyKey}`)
 
   const seen = await findIdempotencyKey(db, CREATE_CHARGE_SCOPE, input.idempotencyKey)
@@ -77,6 +89,19 @@ export async function createOrderCharge(
   }
 
   const charge = await provider.createCharge(input)
+  // O gateway é parte não confiável do dinheiro: o que ele devolveu precisa bater com o que pedimos, antes de
+  // gravar qualquer coisa. A cobrança já existe lá e fica sem linha em payments; o alerta leva o id para o admin
+  // apagá-la (a porta ainda não tem cancelamento) e a conciliação a aponta como `missing_payment_row`.
+  const wrong = chargeMismatches(input, charge)
+  if (wrong.length > 0) {
+    alert({
+      severity: 'critical',
+      code: 'charge_created_mismatch',
+      message: `O gateway criou a cobrança com valores diferentes do pedido (${wrong.join(', ')}): cancelar no gateway`,
+      context: { orderId: input.orderId, providerPaymentId: charge.providerPaymentId },
+    })
+    throw new PaymentProviderError('conflict', `Gateway devolveu valores diferentes do pedido (${wrong.join(', ')})`)
+  }
   const payment = await insertPayment(db, {
     id: newId(),
     orderId: input.orderId,
@@ -86,8 +111,8 @@ export async function createOrderCharge(
     status: charge.status,
     devId: input.devId,
     devWalletId: input.devWalletId,
-    grossCents: charge.grossCents,
-    devAmountCents: charge.devAmountCents,
+    grossCents: input.grossCents,
+    devAmountCents: input.devAmountCents,
     netCents: charge.netCents,
     splitStatus: charge.splitStatus,
     checkoutUrl: charge.checkoutUrl,

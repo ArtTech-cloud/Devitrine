@@ -30,7 +30,9 @@ export function getPaymentProvider(): PaymentProvider {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('PaymentProvider de produção indisponível: adaptador Asaas pendente (ADR-017)')
   }
-  globalForGateway.__paymentProvider ??= new FakePaymentProvider(getRecipientGateway())
+  globalForGateway.__paymentProvider ??= new FakePaymentProvider(getRecipientGateway(), {
+    webhookToken: process.env.ASAAS_WEBHOOK_TOKEN || undefined,
+  })
   return globalForGateway.__paymentProvider
 }
 

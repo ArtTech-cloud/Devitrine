@@ -9,6 +9,12 @@ export const MAX_BODY_BYTES = 1_000_000
 /** A varredura só reenfileira o que está em `received` há mais que isto, para não disputar com o envio normal. */
 export const SWEEP_GRACE_SECONDS = 120
 
+/**
+ * Evento em `retrying` sem nova execução há mais que isto perdeu o job (o Inngest desistiu ou ficou fora do ar):
+ * a varredura o reenfileira. Maior que o backoff normal, para não disputar com os retries que ainda estão vivos.
+ */
+export const SWEEP_RETRYING_GRACE_SECONDS = 3600
+
 /** Máximo de eventos reenfileirados por varredura; o resto fica para a próxima (a cada 5 minutos). */
 export const SWEEP_BATCH = 200
 

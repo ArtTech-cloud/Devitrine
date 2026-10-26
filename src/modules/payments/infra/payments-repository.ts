@@ -1,5 +1,5 @@
 import 'server-only'
-import { and, eq, gte, lte, sql } from 'drizzle-orm'
+import { and, eq, gte, lt, lte, or, sql } from 'drizzle-orm'
 import { schema, type Db } from '@/lib/db'
 import type { ChargeStatus, SplitStatus, WebhookProvider } from '../domain/provider'
 
@@ -75,6 +75,24 @@ export async function listPaymentsCreatedBetween(db: Db, from: Date, to: Date): 
     .select()
     .from(schema.payments)
     .where(and(gte(schema.payments.createdAt, from), lte(schema.payments.createdAt, to)))
+}
+
+/**
+ * Cobranças criadas ANTES da janela que ainda importam: seguem pendentes (um Pix pode ser pago dias depois) ou
+ * mudaram dentro da janela. A listagem do gateway é por data de criação e não as alcança (ADR-020).
+ */
+export async function listPaymentsToRecheck(db: Db, windowFrom: Date, limit: number): Promise<PaymentRow[]> {
+  return db
+    .select()
+    .from(schema.payments)
+    .where(
+      and(
+        lt(schema.payments.createdAt, windowFrom),
+        or(eq(schema.payments.status, 'pending'), gte(schema.payments.updatedAt, windowFrom)),
+      ),
+    )
+    .orderBy(schema.payments.createdAt)
+    .limit(limit)
 }
 
 export async function findIdempotencyKey(db: Db, scope: string, key: string) {

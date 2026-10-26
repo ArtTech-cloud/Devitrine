@@ -35,8 +35,8 @@ class RecordingOrders implements OrderPaymentEffects {
   }
 }
 
-function setup(opts: { enqueueFails?: boolean } = {}) {
-  const provider = new FakePaymentProvider(new FakeRecipientGateway())
+function setup(opts: { enqueueFails?: boolean; createDelayMs?: number } = {}) {
+  const provider = new FakePaymentProvider(new FakeRecipientGateway(), { createDelayMs: opts.createDelayMs })
   const orders = new RecordingOrders()
   const alerts: PaymentAlert[] = []
   const queue: string[] = []
@@ -631,5 +631,267 @@ describe('append-only e acesso', () => {
     await expect(
       asService((db) => db.execute(sql`insert into public.webhook_event_status (id) values (gen_random_uuid())`)),
     ).rejects.toThrow()
+  })
+})
+
+describe('B1: um pedido, uma cobrança, mesmo com chaves diferentes em paralelo', () => {
+  it('duas chamadas simultâneas com chaves diferentes criam uma única cobrança no gateway', async () => {
+    // A latência simulada abre a janela em que a checagem "já tem cobrança aberta" passaria nas duas chamadas.
+    const ctx = setup({ createDelayMs: 150 })
+    const dev = await createUser({ signupRole: 'dev' })
+    const orderId = randomUUID()
+    const base = {
+      orderId,
+      devId: dev.id,
+      customer,
+      method: 'pix' as const,
+      grossCents: 10_000n,
+      devWalletId: `wallet-${dev.id}`,
+      devAmountCents: 8_500n,
+    }
+    const results = await Promise.allSettled(
+      ['a', 'b'].map((k) =>
+        asService((db) =>
+          createOrderCharge(db, ctx.provider, { ...base, idempotencyKey: `k-${k}-${orderId}` }, ctx.deps.alert),
+        ),
+      ),
+    )
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult
+    expect(rejected.reason).toBeInstanceOf(PaymentProviderError)
+    expect(ctx.provider.calls.createCharge).toBe(1)
+    const rows = await asService((db) =>
+      db.execute<{ n: number }>(sql`select count(*)::int n from public.payments where order_id = ${orderId}::uuid`),
+    )
+    expect(rows[0]!.n).toBe(1)
+  })
+})
+
+describe('B2: pago no gateway depois de vencer ou ser apagada', () => {
+  it('alerta crítico paid_after_cancel, sem confirmar o pedido, sem lançar e sem mudar o status gravado', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    await deliver(ctx, ctx.provider.simulateOverdue(c.charge.providerPaymentId))
+    await drain(ctx)
+    expect(ctx.orders.cancelled).toEqual([c.orderId])
+
+    const late = ctx.provider.simulateLatePayment(c.charge.providerPaymentId)
+    await deliver(ctx, late)
+    expect(await drain(ctx)).toEqual([])
+
+    const alert = ctx.alerts.find((a) => a.code === 'paid_after_cancel')
+    expect(alert).toMatchObject({ severity: 'critical' })
+    expect(ctx.orders.confirmed).toEqual([])
+    expect(await ledgerTxCount(paymentConfirmedKey('fake', c.charge.providerPaymentId))).toBe(0)
+    const row = await paymentRow(c.charge.providerPaymentId)
+    expect(row.status).toBe('overdue')
+    expect(row.confirmed_at).toBeNull()
+
+    // A conciliação mantém o caso aberto até alguém decidir.
+    const report = await asService((db) => reconcilePayments(db, ctx.provider, ctx.deps.alert, { now: future() }))
+    expect(mine(ctx, report.divergences).map((d) => d.kind)).toEqual(['paid_after_cancel'])
+  })
+})
+
+describe('B3 e M3: divergência de valores falha fechado', () => {
+  it.each([
+    ['bruto', { grossCents: 10_100n }],
+    ['parte do dev', { devAmountCents: 9_000n }],
+    ['carteira', { devWalletId: 'wallet-trocada' }],
+  ] as const)(
+    'webhook com %s diferente do gravado: sem lançamento, sem confirmação, evento em retry com alerta',
+    async (_name, patch) => {
+      const ctx = setup()
+      const c = await newCharge(ctx)
+      const events = ctx.provider.simulatePayment(c.charge.providerPaymentId)
+      ctx.provider.tamper(c.charge.providerPaymentId, patch)
+      await deliver(ctx, events[0]!)
+      const id = eventIdOf(ctx)
+      const errors = await drain(ctx)
+      expect(errors).toHaveLength(1)
+      expect(ctx.alerts.some((a) => a.code === 'charge_mismatch' && a.severity === 'critical')).toBe(true)
+      expect(ctx.orders.confirmed).toEqual([])
+      expect(await ledgerTxCount(paymentConfirmedKey('fake', c.charge.providerPaymentId))).toBe(0)
+      const row = await paymentRow(c.charge.providerPaymentId)
+      expect(row.status).toBe('pending')
+      expect(row.confirmed_at).toBeNull()
+      expect((await eventStatus(id)).status).toBe('retrying')
+    },
+  )
+
+  it('o gateway cria a cobrança com valores diferentes do pedido: nada é gravado e o alerta leva o id da cobrança', async () => {
+    const ctx = setup()
+    const create = ctx.provider.createCharge.bind(ctx.provider)
+    ctx.provider.createCharge = async (input) => ({ ...(await create(input)), grossCents: 100n })
+    const dev = await createUser({ signupRole: 'dev' })
+    const orderId = randomUUID()
+    const key = `charge-${orderId}`
+    await expect(
+      asService((db) =>
+        createOrderCharge(
+          db,
+          ctx.provider,
+          {
+            orderId,
+            devId: dev.id,
+            customer,
+            method: 'pix',
+            grossCents: 10_000n,
+            devWalletId: 'wallet-m3',
+            devAmountCents: 8_500n,
+            idempotencyKey: key,
+          },
+          ctx.deps.alert,
+        ),
+      ),
+    ).rejects.toBeInstanceOf(PaymentProviderError)
+    const alert = ctx.alerts.find((a) => a.code === 'charge_created_mismatch')
+    expect(alert).toMatchObject({ severity: 'critical' })
+    expect(alert?.context).toMatchObject({ orderId, providerPaymentId: expect.any(String) })
+    const counts = await asService((db) =>
+      db.execute<{ p: number; k: number }>(
+        sql`select (select count(*)::int from public.payments where order_id = ${orderId}::uuid) p,
+                   (select count(*)::int from public.idempotency_keys where key = ${key}) k`,
+      ),
+    )
+    expect(counts[0]).toEqual({ p: 0, k: 0 })
+  })
+})
+
+describe('M1: falha tardia de um worker não reabre evento concluído', () => {
+  it('o worker lento que falha depois de outro concluir o evento devolve skipped e o status segue processed', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const [pay] = ctx.provider.simulatePayment(c.charge.providerPaymentId)
+    await deliver(ctx, pay!)
+    const id = eventIdOf(ctx)
+    ctx.queue.length = 0
+
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const slowProvider = Object.create(ctx.provider) as FakePaymentProvider
+    slowProvider.getCharge = async () => {
+      await gate
+      throw new Error('gateway caiu')
+    }
+    const slow = processWebhookEvent(id, { ...ctx.deps, provider: slowProvider })
+
+    // Outro worker conclui o evento enquanto o primeiro espera a resposta do gateway.
+    expect(await processWebhookEvent(id, ctx.deps)).toBe('processed')
+    release()
+    expect(await slow).toBe('skipped')
+    const status = await eventStatus(id)
+    expect(status.status).toBe('processed')
+    // Só a execução que concluiu foi gravada: nenhuma `failed` depois dela.
+    const runs = await asService((db) =>
+      db.execute<{ outcome: string }>(
+        sql`select outcome from public.webhook_event_runs where webhook_event_id = ${id}::uuid order by seq`,
+      ),
+    )
+    expect(runs.map((r) => r.outcome)).toEqual(['processed'])
+    expect(await ledgerTxCount(paymentConfirmedKey('fake', c.charge.providerPaymentId))).toBe(1)
+  })
+})
+
+describe('M2: evento em retrying sem job vivo é recolhido pela varredura', () => {
+  it('reenfileira o retrying sem execução há mais de 1 h e deixa o recente em paz', async () => {
+    const ctx = setup()
+    const mk = async (ageSeconds: number) => {
+      const id = randomUUID()
+      await asService(async (db) => {
+        await db.insert(schema.webhookEvents).values({
+          id,
+          provider: 'fake',
+          eventId: `evt_m2_${id}`,
+          type: 'ignored',
+          rawType: 'ALGUM_EVENTO',
+          payload: {},
+          receivedAt: new Date(Date.now() - (ageSeconds + 60) * 1000),
+        })
+        await db.insert(schema.webhookEventRuns).values({
+          webhookEventId: id,
+          outcome: 'failed',
+          error: 'x',
+          createdAt: new Date(Date.now() - ageSeconds * 1000),
+        })
+      })
+      return id
+    }
+    const old = await mk(2 * 3600)
+    const recent = await mk(60)
+    expect((await eventStatus(old)).status).toBe('retrying')
+    await sweepStuckWebhooks(ctx.deps)
+    expect(ctx.queue).toContain(old)
+    expect(ctx.queue).not.toContain(recent)
+  })
+})
+
+describe('M4: a conciliação alcança cobrança criada antes da janela', () => {
+  it('Pix pago no 5º dia, criado fora da janela de listagem, ainda é conferido', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    ctx.provider.simulatePayment(c.charge.providerPaymentId)
+    const now = new Date(Date.now() + 5 * 24 * 3_600_000)
+    const report = await asService((db) => reconcilePayments(db, ctx.provider, ctx.deps.alert, { now }))
+    const kinds = mine(ctx, report.divergences)
+      .map((d) => d.kind)
+      .sort()
+    expect(kinds).toEqual(['ledger_missing', 'split_mismatch', 'status_mismatch'])
+  })
+})
+
+describe('L3: corpo do webhook é validado com Zod', () => {
+  const count = () =>
+    asService(
+      async (db) => (await db.execute<{ n: number }>(sql`select count(*)::int n from public.webhook_events`))[0]!.n,
+    )
+
+  it.each([
+    ['id numérico', { id: 123, event: 'PAYMENT_RECEIVED' }],
+    ['evento com 121 caracteres', { id: 'evt_1', event: 'X'.repeat(121) }],
+    ['id com 201 caracteres', { id: 'e'.repeat(201), event: 'PAYMENT_RECEIVED' }],
+    ['payment.id objeto', { id: 'evt_2', event: 'PAYMENT_RECEIVED', payment: { id: { a: 1 } } }],
+    ['splitId numérico', { id: 'evt_3', event: 'PAYMENT_SPLIT_DONE', additionalInfo: { splitId: 7 } }],
+    ['array', []],
+    ['null', null],
+  ])('%s retorna 400 e nada é gravado', async (_name, body) => {
+    const ctx = setup()
+    const before = await count()
+    const headers = ctx.provider.delivery({ id: 'x', event: 'x', dateCreated: '' }).headers
+    expect((await receiveWebhook(JSON.stringify(body), headers, ctx.deps)).status).toBe(400)
+    expect(await count()).toBe(before)
+    expect(ctx.queue).toEqual([])
+  })
+})
+
+describe('L5: colunas imutáveis de payments', () => {
+  it('identidade e valores não mudam; andamento sim; confirmação e líquido congelam depois de confirmados', async () => {
+    const ctx = setup()
+    const c = await newCharge(ctx)
+    const pid = c.charge.providerPaymentId
+    const update = (set: string) =>
+      asService((db) => db.execute(sql.raw(`update public.payments set ${set} where provider_payment_id = '${pid}'`)))
+
+    for (const set of [
+      'gross_cents = gross_cents + 1',
+      'dev_amount_cents = dev_amount_cents - 1',
+      "dev_wallet_id = 'outra'",
+      "provider_payment_id = 'trocado'",
+      'order_id = gen_random_uuid()',
+      'dev_id = gen_random_uuid()',
+      "method = 'card'",
+      "created_at = now() - interval '1 day'",
+    ]) {
+      await expect(update(set), set).rejects.toThrow()
+    }
+
+    // Andamento normal continua permitido.
+    await update("status = 'received', split_status = 'done', net_cents = 9901, confirmed_at = now()")
+    expect((await paymentRow(pid)).status).toBe('received')
+    // Depois de confirmado, momento e líquido ficam fixos.
+    await expect(update('net_cents = 9000')).rejects.toThrow()
+    await expect(update("confirmed_at = now() + interval '1 day'")).rejects.toThrow()
+    await update("status = 'refunded'")
+    expect((await paymentRow(pid)).status).toBe('refunded')
   })
 })

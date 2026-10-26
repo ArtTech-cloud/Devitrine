@@ -44,6 +44,7 @@ export async function applyPaymentEvent(db: Db, ctx: ApplyEventContext): Promise
       splitStatus: stored.splitStatus as Charge['splitStatus'],
       grossCents: stored.grossCents,
       devAmountCents: stored.devAmountCents,
+      devWalletId: stored.devWalletId,
       netCents: stored.netCents,
       escrowId: stored.escrowId,
       confirmedAt: stored.confirmedAt,
@@ -52,12 +53,27 @@ export async function applyPaymentEvent(db: Db, ctx: ApplyEventContext): Promise
   )
 
   if (plan.mismatches.length > 0) {
+    // Falha fechado: nada é gravado, lançado nem avisado ao pedido. O erro desfaz a transação e o evento fica em
+    // retry (e vira `failed` com alerta se a divergência persistir); uma pessoa corrige no gateway ou na conciliação.
     alert({
       severity: 'critical',
       code: 'charge_mismatch',
-      message: `Cobrança diverge do que foi gravado: ${plan.mismatches.join(', ')}`,
+      message: `Cobrança diverge do que foi gravado: ${plan.mismatches.join(', ')}. Evento não aplicado`,
       context: { orderId: stored.orderId, providerPaymentId: pid },
     })
+    throw new PaymentProviderError('conflict', `Cobrança ${pid} diverge do gravado (${plan.mismatches.join(', ')})`)
+  }
+
+  if (plan.paidAfterCancel) {
+    // Pago no gateway depois de vencer ou ser apagada: o pedido já foi cancelado. Não lança, não confirma e não
+    // reabre o pedido sozinho; o dinheiro está no gateway e a devolução é decisão humana (SPEC §9).
+    alert({
+      severity: 'critical',
+      code: 'paid_after_cancel',
+      message: `Cobrança ${stored.status} paga no gateway (${charge.status}): devolver ao cliente ou decidir o pedido manualmente`,
+      context: { orderId: stored.orderId, providerPaymentId: pid, storedStatus: stored.status, gatewayStatus: charge.status },
+    })
+    return 'applied'
   }
 
   if (plan.firstPaid) {

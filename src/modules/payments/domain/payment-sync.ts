@@ -28,7 +28,10 @@ const SPLIT_RANK: Readonly<Record<SplitStatus, number>> = { pending: 0, blocked:
 
 export const isPaidStatus = (s: ChargeStatus): boolean => PAID_IMPLYING.has(s)
 
-/** Só `pending` pode ir para `overdue` ou `deleted`; só cobrança paga pode ser estornada ou contestada. */
+/**
+ * Só `pending` pode ir para `overdue` ou `deleted`; só cobrança paga pode ser estornada ou contestada.
+ * De `overdue` ou `deleted` nada avança: se o gateway depois mostra pago, é `paidAfterCancel`, não uma transição.
+ */
 export function canAdvanceStatus(from: ChargeStatus, to: ChargeStatus): boolean {
   if (from === to) return false
   if (to === 'overdue' || to === 'deleted') return from === 'pending'
@@ -45,6 +48,7 @@ export interface StoredPayment {
   splitStatus: SplitStatus
   grossCents: bigint
   devAmountCents: bigint
+  devWalletId: string
   netCents: bigint | null
   escrowId: string | null
   confirmedAt: Date | null
@@ -58,7 +62,15 @@ export interface PaymentSyncPlan {
   firstPaid: boolean
   /** Cobrança venceu ou foi apagada sem pagamento: o pedido volta a `cancelled`. */
   cancelled: boolean
-  /** Estado que o gateway não respeita (valores diferentes dos gravados): vira alerta, nunca é corrigido sozinho. */
+  /**
+   * Gateway mostra a cobrança paga, mas ela estava gravada como vencida ou apagada (o pedido já foi cancelado).
+   * Nunca confirma o pedido nem lança sozinho: alerta crítico e decisão humana (SPEC §9, `paid_after_cancel`).
+   */
+  paidAfterCancel: boolean
+  /**
+   * Valores do gateway diferentes dos gravados (bruto, parte do dev ou carteira). Falha fechado: o evento não
+   * lança no ledger, não confirma o pedido e não muda nada; fica em retry com alerta (SPEC §9).
+   */
   mismatches: string[]
   changed: boolean
 }
@@ -70,15 +82,19 @@ export function planPaymentSync(stored: StoredPayment, charge: Charge): PaymentS
   const netCents = stored.confirmedAt ? stored.netCents : (charge.netCents ?? stored.netCents)
   const firstPaid = !stored.confirmedAt && isPaidStatus(status)
   const cancelled = stored.status === 'pending' && (status === 'overdue' || status === 'deleted')
+  const paidAfterCancel =
+    (stored.status === 'overdue' || stored.status === 'deleted') && isPaidStatus(charge.status)
   const mismatches: string[] = []
   if (charge.grossCents !== stored.grossCents) mismatches.push('gross_cents')
   if (charge.devAmountCents !== stored.devAmountCents) mismatches.push('dev_amount_cents')
+  if (charge.devWalletId !== stored.devWalletId) mismatches.push('dev_wallet_id')
   return {
     status,
     splitStatus,
     netCents,
     firstPaid,
     cancelled,
+    paidAfterCancel,
     mismatches,
     changed: status !== stored.status || splitStatus !== stored.splitStatus || netCents !== stored.netCents,
   }

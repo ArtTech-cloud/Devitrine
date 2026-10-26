@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { newId } from '@/lib/ids'
 import { feeCents } from '@/lib/money'
 import type {
@@ -19,6 +20,15 @@ import type {
 } from '../domain/provider'
 import { asaasEventNameFor, normalizeAsaasEventName } from '../domain/webhook-events'
 import { tokenMatches } from './token'
+
+/** Limites iguais aos CHECK de `webhook_events` (migração 0017): corpo fora deles daria erro no INSERT, não 400. */
+const webhookBodySchema = z.object({
+  id: z.string().min(1).max(200),
+  event: z.string().min(1).max(120),
+  dateCreated: z.string().max(40).optional(),
+  payment: z.object({ id: z.string().min(1).max(200) }).optional(),
+  additionalInfo: z.object({ splitId: z.string().min(1).max(200) }).optional(),
+})
 
 export const FAKE_WEBHOOK_TOKEN = 'fake-webhook-token-0123456789abcdef0123456789'
 
@@ -65,7 +75,7 @@ export class FakePaymentProvider implements PaymentProvider {
 
   constructor(
     private readonly recipients: RecipientGateway,
-    private readonly options: { webhookToken?: string; now?: () => Date } = {},
+    private readonly options: { webhookToken?: string; now?: () => Date; createDelayMs?: number } = {},
   ) {}
 
   get webhookToken(): string {
@@ -93,6 +103,8 @@ export class FakePaymentProvider implements PaymentProvider {
   // --- PaymentProvider ---
   async createCharge(input: CreateChargeInput): Promise<Charge> {
     this.calls.createCharge++
+    // Latência de rede simulada: abre a janela em que duas chamadas concorrentes se atropelam (teste de trava).
+    if (this.options.createDelayMs) await new Promise((r) => setTimeout(r, this.options.createDelayMs))
     assertChargeInput(input)
     const hash = fingerprint([
       input.orderId,
@@ -234,18 +246,17 @@ export class FakePaymentProvider implements PaymentProvider {
     } catch {
       throw new WebhookPayloadError()
     }
-    const b = body as Partial<FakeWebhookBody> | null
-    if (!b || typeof b.id !== 'string' || typeof b.event !== 'string' || !b.id || !b.event) {
-      throw new WebhookPayloadError()
-    }
+    const parsed = webhookBodySchema.safeParse(body)
+    if (!parsed.success) throw new WebhookPayloadError()
+    const b = parsed.data
     const occurred = b.dateCreated ? new Date(b.dateCreated) : null
     return {
       provider: 'fake',
       eventId: b.id,
       type: normalizeAsaasEventName(b.event),
       rawType: b.event,
-      providerPaymentId: typeof b.payment?.id === 'string' ? b.payment.id : null,
-      splitId: typeof b.additionalInfo?.splitId === 'string' ? b.additionalInfo.splitId : null,
+      providerPaymentId: b.payment?.id ?? null,
+      splitId: b.additionalInfo?.splitId ?? null,
       occurredAt: occurred && !Number.isNaN(occurred.getTime()) ? occurred : null,
     }
   }
@@ -278,6 +289,22 @@ export class FakePaymentProvider implements PaymentProvider {
       events.push(this.body('split_divergence_block', charge, charge.splitId))
     }
     return events
+  }
+
+  /** Cliente paga uma cobrança que já venceu ou foi apagada (o Asaas aceita pagar boleto vencido em alguns casos). */
+  simulateLatePayment(providerPaymentId: string): FakeWebhookBody {
+    const charge = this.mustCharge(providerPaymentId)
+    if (charge.status !== 'overdue' && charge.status !== 'deleted') {
+      throw new PaymentProviderError('conflict', 'Cobrança não está vencida nem apagada')
+    }
+    charge.status = charge.method === 'pix' ? 'received' : 'confirmed'
+    charge.paidAt = this.now()
+    return this.body(charge.method === 'pix' ? 'payment_received' : 'payment_confirmed', charge)
+  }
+
+  /** Gateway "muda" valores da cobrança (só para testar divergência; o Asaas real pode alterar valor de cobrança). */
+  tamper(providerPaymentId: string, patch: { grossCents?: bigint; devAmountCents?: bigint; devWalletId?: string }) {
+    Object.assign(this.mustCharge(providerPaymentId), patch)
   }
 
   /** Cobrança venceu sem pagamento. */

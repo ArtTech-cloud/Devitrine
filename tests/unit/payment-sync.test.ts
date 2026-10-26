@@ -34,6 +34,7 @@ interface Stored {
   splitStatus: SplitStatus
   grossCents: bigint
   devAmountCents: bigint
+  devWalletId: string
   netCents: bigint | null
   escrowId: string | null
   confirmedAt: Date | null
@@ -44,6 +45,7 @@ const fresh = (): Stored => ({
   splitStatus: 'pending',
   grossCents: 10_000n,
   devAmountCents: 8_500n,
+  devWalletId: 'wallet-1',
   netCents: 9_901n,
   escrowId: null,
   confirmedAt: null,
@@ -123,6 +125,46 @@ describe('planPaymentSync: regras', () => {
     expect(isPaidStatus('pending')).toBe(false)
     const first = planPaymentSync(fresh(), charge({ status: 'refunded', paidAt: new Date() }))
     expect(first.firstPaid).toBe(true)
+  })
+})
+
+describe('planPaymentSync: pago depois de cancelado (B2)', () => {
+  const cancelled = (status: 'overdue' | 'deleted'): Stored => ({ ...fresh(), status })
+
+  it.each([
+    ['overdue', 'confirmed'],
+    ['overdue', 'received'],
+    ['overdue', 'refunded'],
+    ['deleted', 'confirmed'],
+    ['deleted', 'received'],
+    ['deleted', 'chargeback'],
+  ] as const)('gravado %s e pago no gateway (%s) vira paidAfterCancel, sem firstPaid nem avanço de status', (stored, gateway) => {
+    const plan = planPaymentSync(cancelled(stored), charge({ status: gateway, paidAt: new Date() }))
+    expect(plan.paidAfterCancel).toBe(true)
+    expect(plan.status).toBe(stored)
+    expect(plan.cancelled).toBe(false)
+  })
+
+  it('cobrança pendente que paga, ou vencida que continua vencida, não é paidAfterCancel', () => {
+    expect(planPaymentSync(fresh(), charge({ status: 'received', paidAt: new Date() })).paidAfterCancel).toBe(false)
+    expect(planPaymentSync(cancelled('overdue'), charge({ status: 'overdue' })).paidAfterCancel).toBe(false)
+    expect(planPaymentSync(cancelled('overdue'), charge({ status: 'deleted' })).paidAfterCancel).toBe(false)
+  })
+})
+
+describe('planPaymentSync: divergência de valores falha fechado (B3)', () => {
+  it.each([
+    ['bruto', { grossCents: 10_001n }, ['gross_cents']],
+    ['parte do dev', { devAmountCents: 8_501n }, ['dev_amount_cents']],
+    ['carteira', { devWalletId: 'wallet-outra' }, ['dev_wallet_id']],
+    ['os três', { grossCents: 1n, devAmountCents: 1n, devWalletId: 'x' }, ['gross_cents', 'dev_amount_cents', 'dev_wallet_id']],
+  ] as const)('%s diferente do gravado', (_name, patch, expected) => {
+    const plan = planPaymentSync(fresh(), charge({ status: 'received', paidAt: new Date(), ...patch }))
+    expect(plan.mismatches).toEqual(expected)
+  })
+
+  it('valores iguais não geram divergência', () => {
+    expect(planPaymentSync(fresh(), charge({ status: 'received', paidAt: new Date() })).mismatches).toEqual([])
   })
 })
 
