@@ -27,6 +27,12 @@ const TABLES: Record<string, Grants> = {
   ledger_accounts: {},
   ledger_entries: {},
   ledger_transactions: {},
+  // Caixa de webhooks, cobranças, idempotência e conciliação (ADR-020): só servidor e jobs (service_role).
+  idempotency_keys: {},
+  payments: {},
+  reconciliation_runs: {},
+  webhook_event_runs: {},
+  webhook_events: {},
   package_curation_events: { authenticated: ['SELECT'] },
   package_tiers: {
     authenticated: [
@@ -53,6 +59,7 @@ const VIEWS: Record<string, Grants> = {
   public_dev_profiles: { anon: ['SELECT'], authenticated: ['SELECT'] },
   public_package_tiers: { anon: ['SELECT'], authenticated: ['SELECT'] },
   public_packages: { anon: ['SELECT'], authenticated: ['SELECT'] },
+  webhook_event_status: {},
 }
 
 /** EXECUTE em funções de public: gatilhos e helpers de policy; o resto é só service_role. */

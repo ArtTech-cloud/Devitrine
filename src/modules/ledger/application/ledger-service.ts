@@ -2,7 +2,14 @@ import 'server-only'
 import type { Db } from '@/lib/db'
 import { devAccount, type LedgerAccountRef } from '../domain/accounts'
 import { assertBalanced, type LedgerTx } from '../domain/transaction'
-import { insertLedgerTx, readAllBalances, readBalanceCents, type PostResult } from '../infra/ledger-repository'
+import {
+  insertLedgerTx,
+  readAllBalances,
+  readBalanceCents,
+  readLedgerTxState,
+  type LedgerTxState,
+  type PostResult,
+} from '../infra/ledger-repository'
 
 /**
  * Lança um lote no ledger dentro da transação de `db` (a mesma de `transition()`, no job de webhook).
@@ -27,4 +34,9 @@ export async function getDevSpendableCents(db: Db, devId: string): Promise<bigin
 
 export function getAllBalances(db: Db): Promise<Map<string, bigint>> {
   return readAllBalances(db)
+}
+
+/** Conciliação: o lote esperado existe no ledger com o mesmo conteúdo? Nunca escreve. */
+export function checkLedgerTx(db: Db, tx: LedgerTx): Promise<LedgerTxState> {
+  return readLedgerTxState(db, tx)
 }

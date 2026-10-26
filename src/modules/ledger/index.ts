@@ -4,6 +4,7 @@ export {
   getBalanceCents,
   getDevSpendableCents,
   getAllBalances,
+  checkLedgerTx,
 } from './application/ledger-service'
 export {
   paymentConfirmed,
@@ -28,4 +29,4 @@ export {
 export type { LedgerAccountCode, LedgerAccountRef, Direction } from './domain/accounts'
 export { LedgerError, assertBalanced, newTx, totals } from './domain/transaction'
 export type { LedgerTx, LedgerLine, LedgerTxKind, LedgerErrorCode } from './domain/transaction'
-export type { PostResult } from './infra/ledger-repository'
+export type { LedgerTxState, PostResult } from './infra/ledger-repository'

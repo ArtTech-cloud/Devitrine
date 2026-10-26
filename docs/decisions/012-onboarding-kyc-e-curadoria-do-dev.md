@@ -19,6 +19,6 @@ A Fase 1 pede perfil do dev, subconta e KYC no gateway, escrow só para dev apro
 
 ## Consequências
 
-- `isFeePayer = false` (plataforma arca com a taxa do escrow) é suposição para a Fase 1 com o fake. Antes de qualquer ambiente de produção, confirmar com o Asaas real e com os números do negócio; não bloqueia o desenvolvimento.
+- `isFeePayer = false` (plataforma arca com a taxa do escrow) é suposição para a Fase 1 com o fake. Antes de qualquer ambiente de produção, confirmar com o Asaas real e com os números do negócio; não bloqueia o desenvolvimento. Consolidado como pendência de negócio no ADR-019.
 - Sem conta de sandbox, tudo roda no fake; o adaptador Asaas (Cofre) entra por `src/lib/composition.ts` sem mudar o módulo.
 - KYC `rejected` permite reenvio sem admin (decisão de Arthur): o dev edita os dados e reinicia; `kyc_status` volta a `not_started`, a subconta recusada e o `escrow_enabled_at` são soltos (o id antigo vai para o log) e `kyc_attempts` (migração 0009) sobe, entrando na chave de idempotência `kyc:{devId}:{tentativa}`. Não há fluxo de apelação. A subconta recusada pode ficar órfã no gateway; limpar é tarefa do adaptador Asaas (Cofre).

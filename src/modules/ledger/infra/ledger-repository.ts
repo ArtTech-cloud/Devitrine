@@ -60,3 +60,25 @@ export async function readAllBalances(db: Db): Promise<Map<string, bigint>> {
   return out
 }
 
+
+export type LedgerTxState = 'missing' | 'match' | 'mismatch'
+
+/**
+ * Compara o lote esperado com o gravado sob a mesma chave de idempotência (conciliação): `missing` se a
+ * chave não existe, `mismatch` se existe com tipo, pedido ou conteúdo diferente. Só lê.
+ */
+export async function readLedgerTxState(db: Db, tx: LedgerTx): Promise<LedgerTxState> {
+  const lines = tx.lines.map((l) => ({
+    code: l.account.code,
+    owner_id: 'ownerId' in l.account ? l.account.ownerId : null,
+    direction: l.direction,
+    amount_cents: l.amountCents.toString(),
+  }))
+  const rows = await db.execute<{ kind: string; order_id: string | null; same_hash: boolean }>(
+    sql`select kind, order_id::text as order_id, lines_hash = md5(${JSON.stringify(lines)}::jsonb::text) as same_hash
+      from public.ledger_transactions where idempotency_key = ${tx.idempotencyKey}`,
+  )
+  const row = rows[0]
+  if (!row) return 'missing'
+  return row.kind === tx.kind && row.order_id === tx.orderId && row.same_hash ? 'match' : 'mismatch'
+}

@@ -121,12 +121,73 @@ export const ledgerTransactions = pgTable('ledger_transactions', {
 
 export const ledgerEntries = pgTable('ledger_entries', {
   id: uuid('id').primaryKey().defaultRandom(),
-  seq: bigint('seq', { mode: 'bigint' }).notNull(),
+  seq: bigint('seq', { mode: 'bigint' }).primaryKey().generatedAlwaysAsIdentity(),
   txId: uuid('tx_id').notNull(),
   accountId: uuid('account_id').notNull(),
   direction: ledgerDirection('direction').notNull(),
   amountCents: bigint('amount_cents', { mode: 'bigint' }).notNull(),
   currency: text('currency').notNull().default('BRL'),
   orderId: uuid('order_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+// Caixa de entrada de webhooks, cobranças e idempotência (migração 0017, ADR-020).
+// webhook_events e webhook_event_runs são append-only; o status é derivado (view webhook_event_status).
+export const webhookEvents = pgTable('webhook_events', {
+  id: uuid('id').primaryKey(),
+  provider: text('provider').notNull(),
+  eventId: text('event_id').notNull(),
+  type: text('type').notNull(),
+  rawType: text('raw_type').notNull(),
+  providerPaymentId: text('provider_payment_id'),
+  splitId: text('split_id'),
+  payload: jsonb('payload').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const webhookEventRuns = pgTable('webhook_event_runs', {
+  seq: bigint('seq', { mode: 'bigint' }).primaryKey().generatedAlwaysAsIdentity(),
+  webhookEventId: uuid('webhook_event_id').notNull(),
+  outcome: text('outcome').notNull(),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const payments = pgTable('payments', {
+  id: uuid('id').primaryKey(),
+  orderId: uuid('order_id').notNull(),
+  provider: text('provider').notNull(),
+  providerPaymentId: text('provider_payment_id').notNull(),
+  method: text('method').notNull(),
+  status: text('status').notNull(),
+  devId: uuid('dev_id').notNull(),
+  devWalletId: text('dev_wallet_id').notNull(),
+  grossCents: bigint('gross_cents', { mode: 'bigint' }).notNull(),
+  devAmountCents: bigint('dev_amount_cents', { mode: 'bigint' }).notNull(),
+  netCents: bigint('net_cents', { mode: 'bigint' }),
+  currency: text('currency').notNull().default('BRL'),
+  splitStatus: text('split_status').notNull().default('pending'),
+  escrowId: text('escrow_id'),
+  checkoutUrl: text('checkout_url'),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const idempotencyKeys = pgTable('idempotency_keys', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  scope: text('scope').notNull(),
+  key: text('key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  resultRef: text('result_ref').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const reconciliationRuns = pgTable('reconciliation_runs', {
+  id: uuid('id').primaryKey(),
+  windowFrom: timestamp('window_from', { withTimezone: true }).notNull(),
+  windowTo: timestamp('window_to', { withTimezone: true }).notNull(),
+  chargesChecked: integer('charges_checked').notNull(),
+  divergences: jsonb('divergences').notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })

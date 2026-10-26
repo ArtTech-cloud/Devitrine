@@ -53,6 +53,7 @@ interface FakeCharge extends Charge {
  * devolvem os eventos que o Asaas enviaria. Redistribuir o mesmo evento é reenviar o mesmo `FakeWebhookBody`.
  */
 export class FakePaymentProvider implements PaymentProvider {
+  readonly name = 'fake' as const
   readonly charges = new Map<string, FakeCharge>()
   readonly escrows = new Map<string, Escrow>()
   readonly refunds = new Map<string, Refund>()
@@ -61,7 +62,6 @@ export class FakePaymentProvider implements PaymentProvider {
   private readonly chargeByKey = new Map<string, { hash: string; id: string }>()
   private readonly refundByKey = new Map<string, { hash: string; refund: Refund }>()
   private readonly releaseKeys = new Map<string, string>()
-  private eventSeq = 0
 
   constructor(
     private readonly recipients: RecipientGateway,
@@ -320,7 +320,8 @@ export class FakePaymentProvider implements PaymentProvider {
     splitId?: string,
   ): FakeWebhookBody {
     return {
-      id: `evt_fake_${++this.eventSeq}`,
+      // Único entre instâncias: `webhook_events` guarda (provider, event_id) como chave única, como o id do Asaas.
+      id: `evt_fake_${newId()}`,
       event: asaasEventNameFor(type),
       dateCreated: this.now().toISOString(),
       payment: { id: charge.providerPaymentId },

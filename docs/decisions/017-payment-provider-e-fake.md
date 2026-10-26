@@ -32,5 +32,5 @@ A Fase 2 precisa do módulo `payments` falando com o gateway só pela interface 
 
 - O fluxo local completo (cobrança → webhook 3× → ledger → conciliação) roda contra o fake sem sandbox. Isso **não** substitui o portão oficial, que continua exigindo um pagamento real no sandbox do Asaas.
 - **Não verificado contra o Asaas real:** o formato do corpo do webhook (`id`, `event`, `payment.id`), onde fica o `splitId` (`additionalInfo.splitId`, que a SPEC cita sem dizer o objeto pai), o formato da garantia e o comportamento real de `splitRefunds`. O fake usa uma forma plausível, só dele; o adaptador real deve conferir cada item na documentação oficial e no sandbox antes de mapear.
-- Em aberto com o Arthur (decisões de negócio, SPEC §14): quem arca com a taxa do chargeback e o prazo de `daysToExpire` da garantia.
+- Em aberto com o Arthur (decisões de negócio, SPEC §14): quem arca com a taxa do chargeback e o prazo de `daysToExpire` da garantia. Consolidado como pendência de negócio no ADR-019.
 - Os PRs do `payments` exigem revisão humana antes do merge e revisão do Vigia.

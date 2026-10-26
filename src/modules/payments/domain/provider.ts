@@ -127,6 +127,8 @@ export interface ListChargesInput {
  * conciliação diária exigem.
  */
 export interface PaymentProvider extends RecipientGateway {
+  /** Nome do provedor, gravado em `payments.provider` e em `webhook_events.provider`. */
+  readonly name: WebhookProvider
   createCharge(input: CreateChargeInput): Promise<Charge>
   getCharge(providerPaymentId: string): Promise<Charge>
   /** Cobranças criadas no intervalo (conciliação das últimas 72 h). */

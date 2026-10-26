@@ -16,6 +16,7 @@ function notImplemented(): never {
  * nome de evento deve ser inventado aqui.
  */
 export class AsaasPaymentProvider implements PaymentProvider {
+  readonly name = 'asaas' as const
   createRecipient = async () => notImplemented()
   getRecipientStatus = async () => notImplemented()
   enableEscrow = async () => notImplemented()

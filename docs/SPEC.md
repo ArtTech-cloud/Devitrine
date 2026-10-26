@@ -204,8 +204,11 @@ O estado do negócio fica em tabelas normais e todo o dinheiro passa por um ledg
 | `ledger_accounts` | Contas do razão (append-only; ADR-018) | `code`, `owner_id` (para contas por dev), `normal_side` |
 | `ledger_transactions` | Cabeçalho de cada lote do ledger, com a chave de idempotência do evento (append-only; ADR-018) | `tx_id`, `kind`, `idempotency_key` (único), `order_id`, `lines_hash` |
 | `ledger_entries` | Lançamentos | `tx_id`, `account_id`, `direction` (debit, credit), `amount_cents`, `currency`, `order_id`, `seq` |
-| `webhook_events` | Caixa de entrada de webhooks | `provider`, `event_id` (único por provedor), `type`, `payload`, `status`, `attempts`, `last_error` |
-| `idempotency_keys` | Evita repetir chamadas ao gateway e POSTs do cliente | `key`, `scope`, `result_ref` |
+| `webhook_events` | Caixa de entrada de webhooks (append-only; ADR-020) | `provider`, `event_id` (único por provedor), `type`, `raw_type`, `provider_payment_id`, `split_id`, `payload`, `received_at` |
+| `webhook_event_runs` | Execuções de cada evento, append-only; `status`, `attempts` e `last_error` vêm da view `webhook_event_status` (ADR-020) | `webhook_event_id`, `outcome` (processed, ignored, failed, dead, requeued), `error` |
+| `payments` | Cobranças no gateway, uma aberta por pedido (ADR-020) | `order_id`, `provider_payment_id`, `method`, `status`, `gross_cents`, `dev_amount_cents`, `net_cents`, `split_status`, `escrow_id` |
+| `idempotency_keys` | Evita repetir chamadas ao gateway e POSTs do cliente (append-only: só se cria; ADR-020) | `scope`, `key` (único por escopo), `request_hash`, `result_ref` |
+| `reconciliation_runs` | Resultado de cada conciliação diária (append-only; ADR-020) | `window_from`, `window_to`, `charges_checked`, `divergences` |
 | `audit_log` | Ações sensíveis | `actor_id`, `action`, `entity`, `entity_id`, `ip`, `diff` |
 | `settings` | Taxas e prazos configuráveis | `key`, `value` |
 | `referrals` | Indicação de um nível (Fase 5) | `referrer_id`, `referred_id`, `share_bps`, `ends_at` |
@@ -375,6 +378,8 @@ Todo webhook segue o mesmo caminho: autenticar, gravar na caixa de entrada, resp
 **Validação de saque** (endpoint síncrono): aprovar só se a operação foi pedida pela própria conta do dev, o valor cabe no saldo disponível do ledger e o favorecido é a conta bancária cadastrada. Toda decisão vai para `withdrawal_checks`.
 
 **Conciliação diária:** um job compara as cobranças e splits das últimas 72 h no gateway com `payments` e com o ledger. Divergência abre alerta e uma tarefa no painel do admin.
+
+**Notas de implementação (ADR-020):** como `webhook_events` é append-only, o `status` (`received`, `processed`, `ignored`, `retrying`, `failed`), as tentativas e o último erro vêm de `webhook_event_runs` e da view `webhook_event_status`. Estorno, chargeback e split só atualizam o status e alertam até a Fase 3, que traz os lançamentos. Enquanto o módulo `orders` não existe, o efeito no pedido falha fechado e o evento é repetido.
 
 **Testes obrigatórios**
 
@@ -550,7 +555,7 @@ Seis decisões travam fases específicas; nenhuma impede começar a Fase 0 hoje.
 | Decisão | Opções | Trava | Quem decide |
 | --- | --- | --- | --- |
 | Nicho inicial e nome da marca | A definir | Fase 1 | Fundadores |
-| Contrato com o Asaas: taxas, subcontas, conta escrow, limite de `daysToExpire` e quem arca com chargeback de cobrança com split | Asaas; Pagar.me ou Mercado Pago como plano B | Fase 2 | Fundadores e Asaas |
+| Contrato com o Asaas: taxas, subcontas, conta escrow, limite de `daysToExpire` e quem arca com chargeback de cobrança com split (suposições em vigor no [ADR-019](decisions/019-pendencias-de-negocio-do-gateway.md); revisitar antes de produção) | Asaas; Pagar.me ou Mercado Pago como plano B | Fase 2 | Fundadores e Asaas |
 | Regime tributário e tratamento da receita como intermediação | Simples Nacional ou Lucro Presumido | Primeiro pedido pago | Contador |
 | Taxas e prazos finais | Valores das seções 2 e 7 como ponto de partida | Piloto | Fundadores, com dados dos primeiros pedidos |
 | Política de reembolso e arrependimento | A definir | Fase 4 | Advogado |
