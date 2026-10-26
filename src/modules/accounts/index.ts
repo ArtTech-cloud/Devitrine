@@ -23,4 +23,11 @@ export type { PublicDev } from './infra/public-devs-repository'
 export { ensureDevEscrow } from './application/escrow'
 export type { DevProfile, CurationRow } from './infra/dev-profiles-repository'
 export type { DevStatus } from './domain/dev-status'
-export type { KycState } from './domain/recipient-gateway'
+export type {
+  KycState,
+  CompanyType,
+  CreateRecipientInput,
+  RecipientGateway,
+  RecipientRef,
+  RecipientStatus,
+} from './domain/recipient-gateway'

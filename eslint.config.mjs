@@ -6,11 +6,19 @@ const MODULES = [
   'disputes', 'reviews', 'notifications', 'admin', 'referrals',
 ]
 
+// ADR-018: só o módulo ledger escreve (e lê) as tabelas do ledger; os outros usam o index.ts dele.
+const LEDGER_TABLES = ['ledgerAccounts', 'ledgerTransactions', 'ledgerEntries']
+
 // ADR-001/ADR-007: um módulo só importa outro pelo index.ts.
 const boundaryRules = MODULES.map((name) => ({
   files: [`src/modules/${name}/**/*.{ts,tsx}`],
   rules: {
     'no-restricted-imports': ['error', {
+      paths: name === 'ledger' ? [] : [{
+        name: '@/lib/db/schema',
+        importNames: LEDGER_TABLES,
+        message: 'Só o módulo ledger acessa as tabelas do ledger (ADR-018): use a API pública dele.',
+      }],
       patterns: [{
         group: MODULES.filter((m) => m !== name).flatMap((m) => [`@/modules/${m}/*`, `**/modules/${m}/*`]),
         message: 'Importe outro módulo só pela API pública (index.ts).',

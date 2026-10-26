@@ -23,6 +23,10 @@ const TABLES: Record<string, Grants> = {
       'UPDATE(bio,display_name,portfolio_links)',
     ],
   },
+  // Ledger (ADR-018): fechado para a API; extrato do dev e painel do admin entram na Fase 4.
+  ledger_accounts: {},
+  ledger_entries: {},
+  ledger_transactions: {},
   package_curation_events: { authenticated: ['SELECT'] },
   package_tiers: {
     authenticated: [

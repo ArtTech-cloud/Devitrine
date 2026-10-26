@@ -201,8 +201,9 @@ O estado do negócio fica em tabelas normais e todo o dinheiro passa por um ledg
 | `withdrawal_checks` | Decisões do webhook de validação de saque | `provider_ref`, `dev_id`, `amount_cents`, `decision`, `reason` |
 | `disputes` | Disputas mediadas | `order_id`, `opened_by`, `reason`, `status`, `resolution`, `refund_cents` |
 | `reviews` | Avaliação após a conclusão | `order_id` (único), `rating` (1 a 5), `comment` |
-| `ledger_accounts` | Contas do razão | `code`, `owner_id` (para contas por dev) |
-| `ledger_entries` | Lançamentos | `tx_id`, `account_id`, `direction` (debit, credit), `amount_cents`, `order_id` |
+| `ledger_accounts` | Contas do razão (append-only; ADR-018) | `code`, `owner_id` (para contas por dev), `normal_side` |
+| `ledger_transactions` | Cabeçalho de cada lote do ledger, com a chave de idempotência do evento (append-only; ADR-018) | `tx_id`, `kind`, `idempotency_key` (único), `order_id`, `lines_hash` |
+| `ledger_entries` | Lançamentos | `tx_id`, `account_id`, `direction` (debit, credit), `amount_cents`, `currency`, `order_id`, `seq` |
 | `webhook_events` | Caixa de entrada de webhooks | `provider`, `event_id` (único por provedor), `type`, `payload`, `status`, `attempts`, `last_error` |
 | `idempotency_keys` | Evita repetir chamadas ao gateway e POSTs do cliente | `key`, `scope`, `result_ref` |
 | `audit_log` | Ações sensíveis | `actor_id`, `action`, `entity`, `entity_id`, `ip`, `diff` |
@@ -223,7 +224,7 @@ O estado do negócio fica em tabelas normais e todo o dinheiro passa por um ledg
 | Reembolso parcial R na disputa | `escrow_liability` G | `gateway_cash` R; `dev_payable:{dev}` D′; `platform_revenue` P′ (sobre G − R) |
 | Chargeback depois da liberação | `dev_receivable:{dev}` D; `platform_revenue` P | `gateway_cash` G |
 
-- Cada `tx_id` precisa fechar (débitos = créditos); a função de inserção rejeita o lote inteiro se não fechar.
+- Cada `tx_id` precisa fechar (débitos = créditos); a função de inserção (`ledger_post`) rejeita o lote inteiro se não fechar, e um gatilho deferido repete a checagem no commit para quem inserir direto na tabela. A chave de idempotência do lote é a do evento de negócio (ADR-018).
 - `gateway_cash` é todo o dinheiro no Asaas: a conta da plataforma mais as subcontas dos devs. A conciliação diária compara esse total com os saldos do gateway; taxas cobradas na subconta, como as de transferência, também viram lançamentos.
 - Saldo disponível do dev = `dev_available` − `dev_receivable`. É esse número que o webhook de validação de saque usa; o saque aprovado sai do disponível na hora, antes de a transferência terminar.
 - A plataforma absorve a taxa do gateway: o dev recebe exatamente `D`.
@@ -295,18 +296,18 @@ A tabela abaixo traz todas as transições, inclusive atraso, chargeback e dispu
 No MVP, o Asaas cobra (Pix e cartão), divide o valor com a subconta do dev e retém a parte dele numa conta escrow até a plataforma liberar. Todo acesso ao gateway passa pela interface `PaymentProvider`, o que permite somar a Stripe na fase internacional sem mexer no domínio.
 
 ```ts
-// src/modules/payments/domain/provider.ts
-interface PaymentProvider {
-  createRecipient(dev: DevKyc): Promise<{ accountId: string; walletId: string }>
-  getRecipientStatus(accountId: string): Promise<KycStatus>
+// src/modules/payments/domain/provider.ts (ADR-017). Dinheiro em centavos `bigint`.
+interface PaymentProvider extends RecipientGateway { // createRecipient, getRecipientStatus, enableEscrow (ADR-010)
   createCharge(input: {
     orderId: string; customer: Customer; method: 'pix' | 'card'
-    grossCents: number; devWalletId: string; devAmountCents: number
+    grossCents: bigint; devWalletId: string; devAmountCents: bigint
     idempotencyKey: string
   }): Promise<Charge>
+  getCharge(providerPaymentId: string): Promise<Charge> // o job de webhook busca o recurso (§9, passo 6)
+  listCharges(input: { from: Date; to: Date }): Promise<Charge[]> // conciliação diária
   getEscrow(providerPaymentId: string): Promise<Escrow>
   releaseEscrow(escrowId: string, idempotencyKey: string): Promise<void>
-  refund(providerPaymentId: string, amountCents: number | 'full', idempotencyKey: string): Promise<Refund>
+  refund(providerPaymentId: string, amountCents: bigint | 'full', idempotencyKey: string): Promise<Refund>
   parseWebhook(rawBody: string, headers: Headers): Promise<NormalizedEvent> // autentica antes de tudo
 }
 ```

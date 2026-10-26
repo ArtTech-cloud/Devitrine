@@ -98,3 +98,35 @@ export const packageCurationEvents = pgTable('package_curation_events', {
   reason: text('reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// Ledger (migração 0016, ADR-018): só o módulo ledger escreve; as tabelas são append-only.
+export const ledgerDirection = pgEnum('ledger_direction', ['debit', 'credit'])
+
+export const ledgerAccounts = pgTable('ledger_accounts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  code: text('code').notNull(),
+  ownerId: uuid('owner_id'),
+  normalSide: ledgerDirection('normal_side').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const ledgerTransactions = pgTable('ledger_transactions', {
+  txId: uuid('tx_id').primaryKey(),
+  kind: text('kind').notNull(),
+  idempotencyKey: text('idempotency_key').notNull().unique(),
+  orderId: uuid('order_id'),
+  linesHash: text('lines_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const ledgerEntries = pgTable('ledger_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  seq: bigint('seq', { mode: 'bigint' }).notNull(),
+  txId: uuid('tx_id').notNull(),
+  accountId: uuid('account_id').notNull(),
+  direction: ledgerDirection('direction').notNull(),
+  amountCents: bigint('amount_cents', { mode: 'bigint' }).notNull(),
+  currency: text('currency').notNull().default('BRL'),
+  orderId: uuid('order_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
